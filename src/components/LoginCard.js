@@ -9,7 +9,7 @@ export default function LoginCard() {
 
   return (
     <div className="bg-white rounded-2xl shadow-xl w-[420px] overflow-hidden">
-      
+
       {/* Header */}
       <div className="bg-gradient-to-r from-purple-600 to-orange-500 text-white text-center py-6 px-4">
         <h1 className="text-2xl font-semibold">Bem-vindo!</h1>
@@ -21,25 +21,23 @@ export default function LoginCard() {
 
         {/* Toggle */}
         <div className="flex gap-3">
-          
+
           <button
             onClick={() => setRole("admin")}
-            className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all duration-200 transform hover:scale-105 ${
-              role === "admin"
+            className={`flex-1 py-2 rounded-xl text-sm font-medium cursor-pointer transition-all duration-200 transform hover:scale-105 ${role === "admin"
                 ? "bg-purple-600 text-white shadow-md hover:bg-purple-700"
                 : "bg-gray-200 text-gray-600 hover:bg-gray-300"
-            }`}
+              }`}
           >
             👜 Administrador
           </button>
 
           <button
             onClick={() => setRole("func")}
-            className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all duration-200 transform hover:scale-105 ${
-              role === "func"
+            className={`flex-1 py-2 rounded-xl text-sm font-medium cursor-pointer transition-all duration-200 transform hover:scale-105 ${role === "func"
                 ? "bg-orange-500 text-white shadow-md hover:bg-orange-600"
                 : "bg-gray-200 text-gray-600 hover:bg-gray-300"
-            }`}
+              }`}
           >
             👤 Funcionário
           </button>
@@ -82,7 +80,7 @@ export default function LoginCard() {
 
         {/* Esqueceu senha */}
         <p
-          onClick={() => router.push("/esqueci-senha")}
+          onClick={() => router.push("/forgotPass")}
           className="text-sm text-purple-600 text-right cursor-pointer transition duration-200 hover:underline hover:text-purple-800"
         >
           Esqueceu a senha?
@@ -90,8 +88,8 @@ export default function LoginCard() {
 
         {/* Botão */}
         <button
-          onClick={() => router.push("/PaginaInicial")}
-          className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-3 rounded-xl font-medium shadow-md transition-all duration-200 transform hover:scale-105 hover:shadow-lg cursor-pointer" 
+          onClick={() => router.push("/dashboard")}
+          className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-3 rounded-xl font-medium shadow-md transition-all duration-200 transform hover:scale-105 hover:shadow-lg cursor-pointer"
         >
           Entrar
         </button>
@@ -99,7 +97,7 @@ export default function LoginCard() {
         {/* Cadastro */}
         <p className="text-center text-sm text-gray-600">
           Não tem uma conta?{" "}
-          <span className="text-purple-600 cursor-pointer hover:underline">
+          <span onClick={() => router.push("/SignUp")} className="text-purple-600 cursor-pointer hover:underline">
             Cadastre-se
           </span>
         </p>
