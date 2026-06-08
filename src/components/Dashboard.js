@@ -10,6 +10,11 @@ import TasksPanel from "./dashboard/TasksPanel"
 import InventoryTable from "./dashboard/InventoryTable"
 import AnalyticsCharts from "./dashboard/AnalyticsCharts"
 
+// 1. SEUS NOVOS IMPORTS DA PASTA ORDERS (Casing corrigido com O maiúsculo)
+import { OrdersHeader } from "./Orders/OrdersHeader"
+import { OrdersStats } from "./Orders/OrdersStats"
+import { OrdersTable } from "./Orders/OrdersTable"
+
 export default function Dashboard() {
 
   const [activeTab, setActiveTab] = useState("dashboard")
@@ -33,48 +38,68 @@ export default function Dashboard() {
         {/* Main */}
         <main className="flex-1 overflow-y-auto p-8">
 
-          <div className="max-w-[1600px] mx-auto space-y-6">
+          {/* =========================================================
+              ABA 1: DASHBOARD / TELA INICIAL (Mantém tudo do seu amigo)
+             ========================================================= */}
+          {activeTab === "dashboard" && (
+            <div className="max-w-[1600px] mx-auto space-y-6">
 
-            {/* Header */}
-            <div>
-
-              <h1 className="text-3xl font-bold text-gray-900 mb-1">
-                Dashboard
-              </h1>
-
-              <p className="text-gray-500">
-                Visão geral do sistema de gerenciamento
-              </p>
-
-            </div>
-
-            {/* KPIs */}
-            <KPICards />
-
-            {/* Grid principal */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-
-              {/* Lado esquerdo */}
-              <div className="xl:col-span-2 space-y-6">
-
-                <OrdersList />
-
-                <AnalyticsCharts />
-
+              {/* Header */}
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 mb-1">
+                  Dashboard
+                </h1>
+                <p className="text-gray-500">
+                  Visão geral do sistema de gerenciamento
+                </p>
               </div>
 
-              {/* Lado direito */}
-              <div className="space-y-6">
+              {/* KPIs */}
+              <KPICards />
 
-                <TasksPanel />
+              {/* Grid principal */}
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
 
-                <InventoryTable />
+                {/* Lado esquerdo */}
+                <div className="xl:col-span-2 space-y-6">
+                  <OrdersList />
+                  <AnalyticsCharts />
+                </div>
+
+                {/* Lado direito */}
+                <div className="space-y-6">
+                  <TasksPanel />
+                  <InventoryTable />
+                </div>
 
               </div>
 
             </div>
+          )}
 
-          </div>
+          {/* =========================================================
+              ABA 2: PEDIDOS (O seu novo design funcional com as suas telas)
+             ========================================================= */}
+          {activeTab === "pedidos" && (
+            <div className="max-w-[1600px] mx-auto space-y-6 w-full">
+              <OrdersHeader />
+              <OrdersStats />
+              <OrdersTable />
+            </div>
+          )}
+
+          {/* =========================================================
+              ABA 3: ESTOQUE (Integrado usando a tabela dele)
+             ========================================================= */}
+          {activeTab === "estoque" && (
+            <div className="max-w-[1600px] mx-auto space-y-6 w-full">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 mb-1">Estoque</h1>
+                <p className="text-gray-500">Controle de mercadorias armazenadas</p>
+              </div>
+              <InventoryTable />
+            </div>
+          )}
 
         </main>
 
