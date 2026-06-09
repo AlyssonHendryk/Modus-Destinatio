@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 import Sidebar from "./dashboard/Sidebar"
 import TopBar from "./dashboard/TopBar"
@@ -14,6 +14,7 @@ import AnalyticsCharts from "./dashboard/AnalyticsCharts"
 import { OrdersHeader } from "./Orders/OrdersHeader"
 import { OrdersStats } from "./Orders/OrdersStats"
 import { OrdersTable } from "./Orders/OrdersTable"
+import OrderModal from "./Orders/OrderModal"
 
 // SEPARAÇÃO DE PEDIDOS
 import OrderSeparationHeader from "./separation/OrderSeparationHeader"
@@ -22,6 +23,82 @@ import OrderSeparationGrid from "./separation/OrderSeparationGrid"
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("dashboard")
+  
+  // --- ESTADOS DO CRUD DE PEDIDOS ---
+  const [orders, setOrders] = useState([])
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editingOrder, setEditingOrder] = useState(null)
+
+  // 1. Buscar dados da API Python
+  const fetchOrders = async () => {
+    try {
+      const response = await fetch("http://localhost:8000/api/orders")
+      if (response.ok) {
+        const data = await response.json()
+        setOrders(data)
+      }
+    } catch (error) {
+      console.error("Erro ao conectar com a API Python:", error)
+    }
+  }
+
+  // Busca os pedidos assim que o componente carrega
+  useEffect(() => {
+    fetchOrders()
+  }, [])
+
+  // 2. Criar ou Atualizar Registro
+  const handleSaveOrder = async (orderData) => {
+    try {
+      // TRATAMENTO: encodeURIComponent protege a hashtag '#' na rota do Python
+      const url = editingOrder 
+        ? `http://localhost:8000/api/orders/${encodeURIComponent(editingOrder.id)}`
+        : "http://localhost:8000/api/orders"
+        
+      const method = editingOrder ? "PUT" : "POST"
+
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(orderData)
+      })
+
+      if (response.ok) {
+        fetchOrders() // Recarrega a tabela com os novos dados
+        setIsModalOpen(false)
+        setEditingOrder(null)
+      }
+    } catch (error) {
+      console.error("Erro ao salvar pedido:", error)
+    }
+  }
+
+  // 3. Apagar Registro
+  const handleDeleteOrder = async (orderId) => {
+    if (confirm(`Deseja realmente excluir o pedido ${orderId}?`)) {
+      try {
+        // TRATAMENTO: encodeURIComponent adicionado aqui também para a lixeira funcionar com '#'
+        const response = await fetch(`http://localhost:8000/api/orders/${encodeURIComponent(orderId)}`, {
+          method: "DELETE"
+        })
+        if (response.ok) {
+          fetchOrders()
+        }
+      } catch (error) {
+        console.error("Erro ao deletar pedido:", error)
+      }
+    }
+  }
+
+  const handleOpenEdit = (order) => {
+    setEditingOrder(order)
+    setIsModalOpen(true)
+  }
+
+  const handleOpenCreate = () => {
+    setEditingOrder(null)
+    setIsModalOpen(true)
+  }
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
@@ -77,13 +154,26 @@ export default function Dashboard() {
           )}
 
           {/* =========================================================
-              ABA 2: PEDIDOS
+              ABA 2: PEDIDOS (CRUD INTEGRADO COM PYTHON)
              ========================================================= */}
           {activeTab === "pedidos" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full">
-              <OrdersHeader />
-              <OrdersStats />
-              <OrdersTable />
+              <OrdersHeader onNewOrderClick={handleOpenCreate} />
+              <OrdersStats orders={orders} />
+              <OrdersTable 
+                orders={orders} 
+                onEditClick={handleOpenEdit} 
+                onDeleteClick={handleDeleteOrder} 
+                onSave={handleSaveOrder}
+              />
+              
+              {/* O Modal flutuante fica aqui dentro monitorando o estado */}
+              <OrderModal 
+                isOpen={isModalOpen} 
+                onClose={() => setIsModalOpen(false)} 
+                onSave={handleSaveOrder}
+                orderToEdit={editingOrder}
+              />
             </div>
           )}
 
