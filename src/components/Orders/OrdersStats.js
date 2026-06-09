@@ -1,3 +1,5 @@
+"use client";
+
 import {
   Calendar,
   Truck,
@@ -6,11 +8,20 @@ import {
   Clock
 } from 'lucide-react';
 
-export function OrdersStats() {
+export function OrdersStats({ orders = [] }) {
+  // 1. Lógica de cálculo dinâmico baseada no array vindo do Python
+  const totalToday = orders.length;
+  
+  const totalInRoute = orders.filter(order => order.status === 'Em rota').length;
+  const totalCompleted = orders.filter(order => order.status === 'Concluído').length;
+  const totalCanceled = orders.filter(order => order.status === 'Cancelado').length;
+  const totalWaiting = orders.filter(order => order.status === 'Aguardando').length;
+
+  // 2. Mapeamento dos cards mantendo a sua estética original
   const stats = [
     {
       label: 'Pedidos hoje',
-      value: 12,
+      value: totalToday, // <-- Dinâmico
       icon: Calendar,
       color: 'text-gray-600',
       bgColor: 'bg-gray-50',
@@ -18,7 +29,7 @@ export function OrdersStats() {
     },
     {
       label: 'Em rota',
-      value: 4,
+      value: totalInRoute, // <-- Dinâmico
       icon: Truck,
       color: 'text-orange-600',
       bgColor: 'bg-orange-50',
@@ -26,7 +37,7 @@ export function OrdersStats() {
     },
     {
       label: 'Concluídos',
-      value: 6,
+      value: totalCompleted, // <-- Dinâmico
       icon: CheckCircle,
       color: 'text-green-600',
       bgColor: 'bg-green-50',
@@ -34,7 +45,7 @@ export function OrdersStats() {
     },
     {
       label: 'Cancelados',
-      value: 2,
+      value: totalCanceled, // <-- Dinâmico
       icon: XCircle,
       color: 'text-red-600',
       bgColor: 'bg-red-50',
@@ -42,7 +53,7 @@ export function OrdersStats() {
     },
     {
       label: 'Aguardando',
-      value: 27,
+      value: totalWaiting, // <-- Dinâmico
       icon: Clock,
       color: 'text-purple-600',
       bgColor: 'bg-purple-50',

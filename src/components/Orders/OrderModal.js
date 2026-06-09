@@ -12,6 +12,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
   const [status, setStatus] = useState('Aguardando');
   const [items, setItems] = useState([]);
 
+  // Preenche se for edição
   useEffect(() => {
     if (orderToEdit) {
       setId(orderToEdit.id);
@@ -20,7 +21,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
       setStatus(orderToEdit.status);
       setItems(orderToEdit.items || []);
     } else {
-      setId(`#${Math.floor(1000 + Math.random() * 9000)}`);
+      setId(`#${Math.floor(1000 + Math.random() * 9000)}`); // Gera ID aleatório temporário
       setSupplier('');
       setOperation('Venda');
       setStatus('Aguardando');
@@ -45,6 +46,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
   const handleSubmit = (e) => {
     e.preventDefault();
 
+    // Calcular valor total baseado nos itens inseridos (opcional/básico)
     let totalCalculated = "R$ 0,00";
     if (items.length > 0) {
       const sum = items.reduce((acc, item) => {
@@ -68,18 +70,20 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-all animate-fadeIn">
       <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-6">
         
+        {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 pb-4">
           <h2 className="text-xl font-bold text-gray-900">
             {orderToEdit ? `Editar Pedido ${id}` : 'Criar Novo Pedido'}
           </h2>
-          <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-xl transition-colors">
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-xl transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
+        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -90,7 +94,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
                 placeholder="Ex: Coca Cola"
                 value={supplier}
                 onChange={(e) => setSupplier(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-medium"
               />
             </div>
 
@@ -100,7 +104,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
                 <select
                   value={operation}
                   onChange={(e) => setOperation(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                  className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-medium"
                 >
                   <option value="Venda">Venda</option>
                   <option value="Compra">Compra</option>
@@ -111,7 +115,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                  className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-medium"
                 >
                   <option value="Aguardando">Aguardando</option>
                   <option value="Em rota">Em rota</option>
@@ -122,6 +126,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
             </div>
           </div>
 
+          {/* Seção Itens do Pedido */}
           <div className="border-t border-gray-100 pt-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Itens do Pedido</h3>
@@ -148,7 +153,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
                       required
                       value={item.product}
                       onChange={(e) => handleItemChange(index, 'product', e.target.value)}
-                      className="flex-1 min-w-[120px] px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none"
+                      className="flex-1 min-w-[120px] px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-orange-500 transition-all font-medium"
                     />
                     <input
                       type="number"
@@ -157,7 +162,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
                       required
                       value={item.quantity}
                       onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 1)}
-                      className="w-16 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none text-center"
+                      className="w-16 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-orange-500 transition-all text-center font-semibold"
                     />
                     <input
                       type="text"
@@ -165,7 +170,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
                       required
                       value={item.price}
                       onChange={(e) => handleItemChange(index, 'price', e.target.value)}
-                      className="w-24 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none text-right"
+                      className="w-24 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-orange-500 transition-all text-right font-semibold"
                     />
                     <button
                       type="button"
@@ -180,6 +185,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
             )}
           </div>
 
+          {/* Footer Ações */}
           <div className="flex items-center justify-end gap-3 border-t border-gray-100 pt-4 mt-6">
             <button
               type="button"
