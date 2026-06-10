@@ -38,11 +38,12 @@ export default function TasksPanel() {
   ]
 
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+    /* 🛠️ AJUSTE: Mantido o bg-white puro para a interceptação limpa do seu arquivo CSS global */
+    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 transition-colors duration-200">
 
       {/* Header */}
       <div className="mb-6">
-        <h2 className="text-gray-900 font-semibold mb-1">Ações Rápidas</h2>
+        <h2 className="text-gray-900 font-bold text-lg mb-1">Ações Rápidas</h2>
         <p className="text-sm text-gray-500">Tarefas do dia</p>
       </div>
 
@@ -54,15 +55,20 @@ export default function TasksPanel() {
           return (
             <button
               key={task.id}
-              className="w-full flex items-center gap-4 p-4 border border-gray-100 rounded-xl bg-gradient-to-r from-white to-gray-50 hover:from-gray-50 hover:to-white hover:border-gray-200 hover:shadow-md transition-all duration-300 transform hover:scale-[1.02] group cursor-pointer"
+              type="button"
+              /* 🛠️ AJUSTE: Trocado bg-gradient por bg-transparent para evitar o bug do fundo cinza asfalto no claro.
+                 O hover interage com um fundo cinza bem leve e suave sem quebrar a leitura. */
+              className="w-full flex items-center gap-4 p-4 border border-gray-100 dark:border-gray-700 rounded-xl bg-transparent hover:bg-gray-50/50 dark:hover:bg-gray-700/30 hover:border-gray-200 dark:hover:border-gray-600 hover:shadow-md transition-all duration-300 transform hover:scale-[1.01] group cursor-pointer"
             >
-              {/* Ícone */}
-              <div className={`w-12 h-12 bg-gradient-to-br ${task.color} rounded-xl flex items-center justify-center shadow-lg`}>
+              {/* Ícone: O box com gradiente vibrante garante excelente destaque e leitura no Modo Claro */}
+              <div className={`w-12 h-12 bg-gradient-to-br ${task.color} rounded-xl flex items-center justify-center shadow-md`}>
                 <Icon className="w-6 h-6 text-white" />
               </div>
 
-              {/* Texto */}
-              <span className="flex-1 text-left text-gray-900 font-medium">{task.label}</span>
+              {/* Texto: Mantido text-gray-900 puro para o seletor global inverter para branco no escuro */}
+              <span className="flex-1 text-left text-gray-900 font-semibold">
+                {task.label}
+              </span>
 
               {/* Seta */}
               <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-gray-600 group-hover:translate-x-1 transition-all duration-300" />

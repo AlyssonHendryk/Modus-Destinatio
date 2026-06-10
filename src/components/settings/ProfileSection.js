@@ -59,7 +59,8 @@ export default function ProfileSection({ currentUser, setCurrentUser }) {
   const primeiraLetra = currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : "U"
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    /* Contêiner principal estruturado para responder ao seu globals.css */
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition-colors duration-200">
       {/* Banner */}
       <div className="bg-gradient-to-r from-purple-500 via-purple-400 to-orange-400 h-24" />
 
@@ -67,14 +68,16 @@ export default function ProfileSection({ currentUser, setCurrentUser }) {
         {/* Perfil */}
         <div className="flex flex-col xl:flex-row xl:items-start gap-6 -mt-16 mb-6">
           <div className="relative">
-            <div className="w-32 h-32 bg-gradient-to-br from-purple-600 to-orange-600 rounded-2xl flex items-center justify-center text-white text-4xl font-bold shadow-xl border-4 border-white select-none">
+            {/* Borda do avatar adaptável */}
+            <div className="w-32 h-32 bg-gradient-to-br from-purple-600 to-orange-600 rounded-2xl flex items-center justify-center text-white text-4xl font-bold shadow-xl border-4 border-white dark:border-gray-800 select-none">
               {primeiraLetra}
             </div>
+            {/* Botão da câmera com fundo transparente estrutural */}
             <button
               type="button"
-              className="absolute bottom-0 right-0 w-10 h-10 bg-white rounded-xl shadow-lg flex items-center justify-center border border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer"
+              className="absolute bottom-0 right-0 w-10 h-10 bg-transparent border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer group"
             >
-              <Camera className="w-5 h-5 text-gray-600" />
+              <Camera className="w-5 h-5 text-gray-500 group-hover:text-gray-900" />
             </button>
           </div>
 
@@ -82,56 +85,58 @@ export default function ProfileSection({ currentUser, setCurrentUser }) {
             <h2 className="text-2xl font-bold text-gray-900 mb-1">
               {currentUser?.name}
             </h2>
-            <p className="text-gray-600 font-medium">
+            <p className="text-gray-500 font-semibold text-sm">
               {currentUser?.role || "Usuário"}
             </p>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-2 xl:pt-16">
             {!isEditing && (
+              /* 🛠️ MUDANÇA: O botão agora usa preenchimento roxo completo com gradiente e shadow, 
+                 garantindo contraste total no Modo Claro e se integrando visualmente ao botão de Alterar Senha. */
               <button
                 type="button"
                 onClick={startEditing}
-                className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors text-gray-700 cursor-pointer font-medium text-sm shadow-sm"
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-semibold rounded-xl shadow-md hover:shadow-lg transition-all cursor-pointer text-sm"
               >
-                <Edit className="w-4 h-4" />
+                <Edit className="w-4 h-4 text-white" />
                 Editar Perfil
               </button>
             )}
           </div>
         </div>
 
-        {/* Condicional: Se estiver editando mostra os Inputs, senão mostra os cards informativos */}
+        {/* Formulário de Edição */}
         {isEditing ? (
           <form onSubmit={handleSave} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1">Nome Completo</label>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Nome Completo</label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-full p-3 bg-transparent border border-gray-300 dark:border-gray-600 rounded-xl text-sm text-gray-900 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/30 transition-all font-medium"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1">E-mail</label>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">E-mail</label>
                 <input
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-full p-3 bg-transparent border border-gray-300 dark:border-gray-600 rounded-xl text-sm text-gray-900 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/30 transition-all font-medium"
                 />
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-xs font-semibold text-gray-500 mb-1">Telefone</label>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Telefone</label>
                 <input
                   type="text"
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-full p-3 bg-transparent border border-gray-300 dark:border-gray-600 rounded-xl text-sm text-gray-900 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/30 transition-all font-medium"
                 />
               </div>
             </div>
@@ -140,64 +145,70 @@ export default function ProfileSection({ currentUser, setCurrentUser }) {
               <button
                 type="button"
                 onClick={cancelEditing}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-all cursor-pointer"
+                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-xl transition-all cursor-pointer"
               >
                 <X className="w-4 h-4" /> Cancelar
               </button>
               <button
                 type="submit"
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 rounded-xl transition-all shadow-md cursor-pointer"
+                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 rounded-xl transition-all shadow-md cursor-pointer"
               >
                 <Save className="w-4 h-4" /> Salvar Alterações
               </button>
             </div>
           </form>
         ) : (
-          /* Informações Exibidas em Modo de Visualização normal */
+          /* Modo de Visualização normal (Corrigido com bordas finas e ícones vivos) */
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Mail className="w-5 h-5 text-blue-600" />
+            
+            {/* Bloco de E-mail: Ícone Azul Forte */}
+            <div className="flex items-start gap-3 p-4 bg-transparent border border-gray-100 rounded-xl transition-colors">
+              <div className="w-10 h-10 border border-blue-200 dark:border-blue-900/40 rounded-lg flex items-center justify-center shrink-0">
+                <Mail className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-xs text-gray-500 mb-1">E-mail</p>
-                <p className="text-sm font-medium text-gray-900 truncate max-w-[200px] sm:max-w-none">
+                <p className="text-sm font-semibold text-gray-900 truncate">
                   {currentUser?.email}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                <Phone className="w-5 h-5 text-green-600" />
+            {/* Bloco de Telefone: Ícone Verde Forte */}
+            <div className="flex items-start gap-3 p-4 bg-transparent border border-gray-100 rounded-xl transition-colors">
+              <div className="w-10 h-10 border border-green-200 dark:border-green-900/40 rounded-lg flex items-center justify-center shrink-0">
+                <Phone className="w-5 h-5 text-green-600 dark:text-green-400" />
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Telefone</p>
-                <p className="text-sm font-medium text-gray-900">
+                <p className="text-sm font-semibold text-gray-900">
                   {currentUser?.phone}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Calendar className="w-5 h-5 text-purple-600" />
+            {/* Bloco de Data de Cadastro: Ícone Roxo Forte */}
+            <div className="flex items-start gap-3 p-4 bg-transparent border border-gray-100 rounded-xl transition-colors">
+              <div className="w-10 h-10 border border-purple-200 dark:border-purple-900/40 rounded-lg flex items-center justify-center shrink-0">
+                <Calendar className="w-5 h-5 text-purple-600 dark:text-purple-400" />
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Data de Cadastro</p>
-                <p className="text-sm font-medium text-gray-900">15 de Janeiro, 2024</p>
+                <p className="text-sm font-semibold text-gray-900">15 de Janeiro, 2024</p>
               </div>
             </div>
 
-            <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-              <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                <Calendar className="w-5 h-5 text-orange-600" />
+            {/* Bloco de Último Acesso: Ícone Laranja Forte */}
+            <div className="flex items-start gap-3 p-4 bg-transparent border border-gray-100 rounded-xl transition-colors">
+              <div className="w-10 h-10 border border-orange-200 dark:border-orange-900/40 rounded-lg flex items-center justify-center shrink-0">
+                <Calendar className="w-5 h-5 text-orange-600 dark:text-orange-400" />
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Último Acesso</p>
-                <p className="text-sm font-medium text-gray-900">Hoje, 14:23</p>
+                <p className="text-sm font-semibold text-gray-900">Hoje, 14:23</p>
               </div>
             </div>
+
           </div>
         )}
       </div>
