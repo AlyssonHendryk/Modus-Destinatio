@@ -25,12 +25,10 @@ import OrderSeparationGrid from "./separation/OrderSeparationGrid"
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("dashboard")
   
-  // --- ESTADOS DO CRUD DE PEDIDOS ---
   const [orders, setOrders] = useState([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingOrder, setEditingOrder] = useState(null)
 
-  // 📝 ESTADO DE PRODUTOS (Gerenciamento Geral)
   const [products, setProducts] = useState([
     { id: "101", name: "Óleo", max: 150, initialQuantity: 100 },
     { id: "102", name: "Macarrão", max: 100, initialQuantity: 40 },
@@ -38,7 +36,6 @@ export default function Dashboard() {
     { id: "104", name: "Feijão", max: 60, initialQuantity: 30 },
   ])
 
-  // 🏢 ESTADO DE FORNECEDORES
   const [suppliers, setSuppliers] = useState([
     "TechLog Distribuidora Ltda",
     "Nexus Indústria e Comércio",
@@ -46,13 +43,11 @@ export default function Dashboard() {
     "Prime Supply Chain S.A."
   ])
 
-  // Estados dos formulários de cadastro
   const [newProdName, setNewProdName] = useState("")
   const [newProdMax, setNewProdMax] = useState("")
   const [newProdQty, setNewProdQty] = useState("")
   const [newSupplierName, setNewSupplierName] = useState("")
 
-  // Buscar dados da API Python
   const fetchOrders = async () => {
     try {
       const response = await fetch("http://localhost:8000/api/orders")
@@ -69,7 +64,6 @@ export default function Dashboard() {
     fetchOrders()
   }, [])
 
-  // 🛠️ RE-ADICIONADO: Funções de abertura de modal controlando o estado do CRUD
   const handleOpenCreate = () => {
     setEditingOrder(null)
     setIsModalOpen(true)
@@ -80,7 +74,6 @@ export default function Dashboard() {
     setIsModalOpen(true)
   }
 
-  // Funções de Cadastro Local de Itens Gerais do Inventário
   const handleAddProduct = (e) => {
     e.preventDefault()
     if (!newProdName || !newProdMax) return
@@ -149,7 +142,6 @@ export default function Dashboard() {
     }
   }
 
-  // Motor de composição reativa de estoque geral
   const calculateDynamicInventory = () => {
     const currentInventory = {}
     products.forEach(p => {
@@ -193,7 +185,6 @@ export default function Dashboard() {
 
         <main className="flex-1 overflow-y-auto p-8 bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
 
-          {/* ABA 1: DASHBOARD */}
           {activeTab === "dashboard" && (
             <div className="max-w-[1600px] mx-auto space-y-6 animate-fade-in">
               <KPICards />
@@ -204,7 +195,6 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ABA 2: PEDIDOS */}
           {activeTab === "pedidos" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full animate-fade-in">
               <OrdersHeader onNewOrderClick={handleOpenCreate} />
@@ -214,14 +204,12 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ABA 3: ESTOQUE */}
           {activeTab === "estoque" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full animate-fade-in">
               <InventoryTable items={dynamicItems} />
             </div>
           )}
 
-          {/* ABA 5: ÁREA DE CADASTROS */}
           {activeTab === "cadastros" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full animate-fade-in">
               <div>
@@ -230,7 +218,6 @@ export default function Dashboard() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Cadastro de Produtos */}
                 <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 space-y-6">
                   <div className="flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-3">
                     <Tag className="w-5 h-5 text-purple-600" />
@@ -256,23 +243,23 @@ export default function Dashboard() {
                   </form>
 
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left text-gray-600 dark:text-gray-300">
+                    <table className="w-full text-sm text-left">
                       <thead>
-                        <tr className="bg-gray-50 dark:bg-gray-700/50 text-xs font-bold uppercase text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
-                          <th className="py-2.5 px-4">Cód ID</th>
-                          <th className="py-2.5 px-4">Nome</th>
-                          <th className="py-2.5 px-4">Estoque Máx</th>
-                          <th className="py-2.5 px-4 text-center">Ações</th>
+                        <tr className="bg-gray-100 dark:bg-gray-700 text-xs font-bold uppercase text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-700">
+                          <th className="py-3 px-4">Cód ID</th>
+                          <th className="py-3 px-4">Nome</th>
+                          <th className="py-3 px-4">Estoque Máx</th>
+                          <th className="py-3 px-4 text-center">Ações</th>
                         </tr>
                       </thead>
                       <tbody>
                         {products.map(p => (
-                          <tr key={p.id} className="border-b border-gray-50 dark:border-gray-700/40 hover:bg-gray-50/50 dark:hover:bg-gray-700/30">
-                            <td className="py-3 px-4 font-mono font-bold text-purple-600 dark:text-purple-400">{p.id}</td>
-                            <td className="py-3 px-4 font-semibold text-gray-800 dark:text-gray-100">{p.name}</td>
-                            <td className="py-3 px-4 font-medium">{p.max} un</td>
-                            <td className="py-3 px-4 text-center">
-                              <button onClick={() => handleDeleteProduct(p.id)} className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+                          <tr key={p.id} className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                            <td className="py-4 px-4 font-mono font-bold text-purple-700 dark:text-purple-400">{p.id}</td>
+                            <td className="py-4 px-4 font-bold text-gray-900 dark:text-white">{p.name}</td>
+                            <td className="py-4 px-4 font-semibold text-gray-700 dark:text-gray-300">{p.max} un</td>
+                            <td className="py-4 px-4 text-center">
+                              <button onClick={() => handleDeleteProduct(p.id)} className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors cursor-pointer"><Trash2 className="w-4 h-4" /></button>
                             </td>
                           </tr>
                         ))}
@@ -281,11 +268,10 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Cadastro de Fornecedores */}
                 <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 space-y-6">
                   <div className="flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-3">
-                    <Truck className="w-5 h-5 text-orange-500" />
-                    <h2 className="text-lg font-bold text-gray-800 dark:text-white">Fornecedores</h2>
+                    <Truck className="w-5 h-5 text-orange-600" />
+                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">Fornecedores</h2>
                   </div>
 
                   <form onSubmit={handleAddSupplier} className="flex gap-2 items-end">
@@ -293,14 +279,14 @@ export default function Dashboard() {
                       <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 mb-1.5 uppercase">Razão Social / Nome</label>
                       <input type="text" required placeholder="Ex: Metalúrgica Alfa" value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)} className="w-full px-3 py-2 bg-transparent border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl text-sm focus:outline-none focus:border-orange-500" />
                     </div>
-                    <button type="submit" className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold text-sm transition-colors cursor-pointer flex items-center h-[38px]"><Plus className="w-4 h-4" /></button>
+                    <button type="submit" className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl font-bold text-sm transition-colors cursor-pointer flex items-center h-[38px]"><Plus className="w-4 h-4" /></button>
                   </form>
 
                   <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
                     {suppliers.map(sup => (
-                      <div key={sup} className="flex items-center justify-between p-3 bg-gray-50/80 dark:bg-gray-700/40 rounded-xl border border-gray-100 dark:border-gray-700">
-                        <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">{sup}</span>
-                        <button onClick={() => handleDeleteSupplier(sup)} className="p-1 text-gray-400 hover:text-red-500 rounded transition-colors cursor-pointer"><Trash2 className="w-4 h-4" /></button>
+                      <div key={sup} className="flex items-center justify-between p-3 bg-gray-100 dark:bg-gray-700/60 rounded-xl border border-gray-200 dark:border-gray-600">
+                        <span className="text-sm font-bold text-gray-900 dark:text-white">{sup}</span>
+                        <button onClick={() => handleDeleteSupplier(sup)} className="p-1 text-gray-500 hover:text-red-600 dark:hover:text-red-400 rounded transition-colors cursor-pointer"><Trash2 className="w-4 h-4" /></button>
                       </div>
                     ))}
                   </div>
@@ -309,7 +295,6 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Separação de Pedidos */}
           {activeTab === "separar" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full animate-fade-in">
               <OrderSeparationHeader /><OrderSeparationStats /><OrderSeparationGrid />
