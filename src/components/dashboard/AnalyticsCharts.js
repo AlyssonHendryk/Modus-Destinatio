@@ -21,7 +21,7 @@ export default function AnalyticsCharts() {
     { name: "Qua", vendas: 5000, pedidos: 32 },
     { name: "Qui", vendas: 2780, pedidos: 20 },
     { name: "Sex", vendas: 4890, pedidos: 28 },
-    { name: "Sáb", vendas: 2390, pedidos: 15 },
+    { name: "Sáb", text: 2390, vendas: 2390, pedidos: 15 },
     { name: "Dom", vendas: 1490, pedidos: 10 },
   ]
 
@@ -34,55 +34,48 @@ export default function AnalyticsCharts() {
   ]
 
   return (
-
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
       {/* Gráfico de Linha */}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-
+      {/* 🛠️ MUDANÇA: Adicionado dark:bg-gray-800 e dark:border-gray-700 */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors duration-200">
         <div className="mb-6">
-
-          <h3 className="text-gray-900 font-semibold mb-1">
+          <h3 className="text-gray-900 dark:text-white font-semibold mb-1">
             Vendas Semanais
           </h3>
-
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             Últimos 7 dias
           </p>
-
         </div>
 
         <ResponsiveContainer width="100%" height={250}>
-
           <LineChart data={salesData}>
-
+            {/* 🛠️ MUDANÇA: Usando uma classe utilitária de borda do Tailwind para controlar o stroke da grade */}
             <CartesianGrid
               strokeDasharray="3 3"
-              stroke="#f0f0f0"
+              className="stroke-gray-100 dark:stroke-gray-700"
             />
-
             <XAxis
               dataKey="name"
               stroke="#9ca3af"
               tick={{ fontSize: 12 }}
             />
-
             <YAxis
               stroke="#9ca3af"
               tick={{ fontSize: 12 }}
             />
-
+            {/* 🛠️ MUDANÇA: Customizado o Tooltip usando Tailwind dinâmico para se adaptar ao escuro */}
             <Tooltip
               contentStyle={{
-                backgroundColor: "white",
-                border: "1px solid #e5e7eb",
+                backgroundColor: "var(--background-card, #ffffff)",
+                border: "1px solid var(--border-color, #e5e7eb)",
                 borderRadius: "12px",
-                boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
               }}
+              labelStyle={{ color: "var(--text-color, #111827)" }}
+              itemStyle={{ color: "var(--text-color, #111827)" }}
+              className="shadow-lg dark:shadow-black/20"
             />
-
             <Legend />
-
             <Line
               type="monotone"
               dataKey="vendas"
@@ -91,59 +84,49 @@ export default function AnalyticsCharts() {
               dot={{ fill: "#7C3AED", r: 4 }}
               activeDot={{ r: 6 }}
             />
-
           </LineChart>
-
         </ResponsiveContainer>
-
       </div>
 
       {/* Gráfico de Barras */}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-
+      {/* 🛠️ MUDANÇA: Adicionado dark:bg-gray-800 e dark:border-gray-700 */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors duration-200">
         <div className="mb-6">
-
-          <h3 className="text-gray-900 font-semibold mb-1">
+          <h3 className="text-gray-900 dark:text-white font-semibold mb-1">
             Vendas por Categoria
           </h3>
-
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             Este mês
           </p>
-
         </div>
 
         <ResponsiveContainer width="100%" height={250}>
-
           <BarChart data={categoryData}>
-
+            {/* 🛠️ MUDANÇA: Sincronizada a cor da grade com o tema */}
             <CartesianGrid
               strokeDasharray="3 3"
-              stroke="#f0f0f0"
+              className="stroke-gray-100 dark:stroke-gray-700"
             />
-
             <XAxis
               dataKey="name"
               stroke="#9ca3af"
               tick={{ fontSize: 12 }}
             />
-
             <YAxis
               stroke="#9ca3af"
               tick={{ fontSize: 12 }}
             />
-
+            {/* 🛠️ MUDANÇA: Customizado o Tooltip também para o gráfico de barras */}
             <Tooltip
               contentStyle={{
-                backgroundColor: "white",
-                border: "1px solid #e5e7eb",
+                backgroundColor: "var(--background-card, #ffffff)",
+                border: "1px solid var(--border-color, #e5e7eb)",
                 borderRadius: "12px",
-                boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
               }}
+              labelStyle={{ color: "var(--text-color, #111827)" }}
+              itemStyle={{ color: "var(--text-color, #111827)" }}
             />
-
             <defs>
-
               <linearGradient
                 id="colorGradient"
                 x1="0"
@@ -151,31 +134,23 @@ export default function AnalyticsCharts() {
                 x2="0"
                 y2="1"
               >
-
                 <stop
                   offset="0%"
                   stopColor="#F97316"
                 />
-
                 <stop
                   offset="100%"
                   stopColor="#7C3AED"
                 />
-
               </linearGradient>
-
             </defs>
-
             <Bar
               dataKey="value"
               fill="url(#colorGradient)"
               radius={[8, 8, 0, 0]}
             />
-
           </BarChart>
-
         </ResponsiveContainer>
-
       </div>
 
     </div>

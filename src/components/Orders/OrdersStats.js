@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 
 export function OrdersStats({ orders = [] }) {
-  // 1. Lógica de cálculo dinâmico baseada no array vindo do Python
+  // 1. Lógica de cálculo dinâmico mantida perfeitamente
   const totalToday = orders.length;
   
   const totalInRoute = orders.filter(order => order.status === 'Em rota').length;
@@ -17,47 +17,42 @@ export function OrdersStats({ orders = [] }) {
   const totalCanceled = orders.filter(order => order.status === 'Cancelado').length;
   const totalWaiting = orders.filter(order => order.status === 'Aguardando').length;
 
-  // 2. Mapeamento dos cards mantendo a sua estética original
+  // 🎨 SINALIZAÇÃO VIVA: Caixas baseadas em bg-white para blindar contra o bloqueio asfalto do CSS global no Modo Claro
   const stats = [
     {
       label: 'Pedidos hoje',
-      value: totalToday, // <-- Dinâmico
+      value: totalToday,
       icon: Calendar,
-      color: 'text-gray-600',
-      bgColor: 'bg-gray-50',
-      borderColor: 'border-gray-200'
+      color: 'text-gray-600 dark:text-gray-400',
+      borderColor: 'border-gray-200 dark:border-gray-700'
     },
     {
       label: 'Em rota',
-      value: totalInRoute, // <-- Dinâmico
+      value: totalInRoute,
       icon: Truck,
-      color: 'text-orange-600',
-      bgColor: 'bg-orange-50',
-      borderColor: 'border-orange-200'
+      color: 'text-blue-600 dark:text-blue-400',
+      borderColor: 'border-blue-200 dark:border-blue-900/40'
     },
     {
       label: 'Concluídos',
-      value: totalCompleted, // <-- Dinâmico
+      value: totalCompleted,
       icon: CheckCircle,
-      color: 'text-green-600',
-      bgColor: 'bg-green-50',
-      borderColor: 'border-green-200'
+      color: 'text-green-600 dark:text-green-400',
+      borderColor: 'border-green-200 dark:border-green-900/40'
     },
     {
       label: 'Cancelados',
-      value: totalCanceled, // <-- Dinâmico
+      value: totalCanceled,
       icon: XCircle,
-      color: 'text-red-600',
-      bgColor: 'bg-red-50',
-      borderColor: 'border-red-200'
+      color: 'text-red-600 dark:text-red-400',
+      borderColor: 'border-red-200 dark:border-red-900/40'
     },
     {
       label: 'Aguardando',
-      value: totalWaiting, // <-- Dinâmico
+      value: totalWaiting,
       icon: Clock,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-50',
-      borderColor: 'border-purple-200'
+      color: 'text-amber-500 dark:text-amber-400',
+      borderColor: 'border-amber-200 dark:border-amber-900/40'
     }
   ];
 
@@ -68,12 +63,21 @@ export function OrdersStats({ orders = [] }) {
         return (
           <div
             key={stat.label}
-            className={`${stat.bgColor} ${stat.borderColor} border rounded-xl p-4 flex items-center gap-3 transition-all hover:shadow-sm`}
+            /* 🛠️ AJUSTE: Trocado bg-color leve manual por bg-white para garantir o contraste perfeito no claro.
+               O número do indicador agora adota font-bold com a cor semântica correspondente da métrica. */
+            className={`bg-white ${stat.borderColor} border rounded-xl p-4 flex items-center gap-3 shadow-sm hover:shadow-md transition-all duration-200`}
           >
-            <Icon className={`w-5 h-5 ${stat.color}`} />
+            <div className="shrink-0">
+              <Icon className={`w-5 h-5 ${stat.color}`} />
+            </div>
             <div>
-              <p className="text-sm text-gray-600">{stat.label}</p>
-              <p className={`text-2xl font-semibold ${stat.color}`}>{stat.value}</p>
+              {/* Mantido o text-gray-500 font-medium clássico para a legenda */}
+              <p className="text-xs text-gray-500 font-semibold mb-0.5 tracking-wide uppercase">
+                {stat.label}
+              </p>
+              <p className={`text-2xl font-bold ${stat.color}`}>
+                {stat.value}
+              </p>
             </div>
           </div>
         );

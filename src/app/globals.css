@@ -1,26 +1,76 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* 1. VARIANTES E COMPORTAMENTO PADRÃO DO SISTEMA */
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background-color: #f9fafb; /* Fundo gray-50 limpo e nativo para o Modo Claro */
+  color: #111827;            /* Texto gray-900 */
   font-family: Arial, Helvetica, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* 2. CHAVEAMENTO AUTOMÁTICO DO MODO ESCURO (APENAS COM .dark NO HTML) */
+html.dark body {
+  background-color: #090d16; /* Fundo escuro do ModusDestinatio */
+  color: #f9fafb;
+}
+
+/* 3. INTERCEPTAÇÃO SELETIVA PARA RESPONDER AO BOTÃO CLARO/ESCURO */
+/* No Modo Claro, respeita o fundo branco dos teus cards. No Modo Escuro, passa para o tom correto */
+html:not(.dark) .bg-white {
+  background-color: #ffffff !important;
+}
+html.dark .bg-white {
+  background-color: #111c44 !important; /* Tom azul-escuro/grafite dos teus cards */
+}
+
+/* Ajuste dos subcards e fundos secundários (como listas de tarefas e fundos de tabelas) */
+html:not(.dark) .bg-gray-50 {
+  background-color: #f9fafb !important;
+}
+html.dark .bg-gray-50 {
+  background-color: #0d1428 !important; /* Fundo interno ligeiramente mais escuro que o card */
+}
+
+/* Garante que os textos principais fiquem escuros no claro e claros no escuro */
+html:not(.dark) .text-gray-900 {
+  color: #111827 !important;
+}
+html.dark .text-gray-900 {
+  color: #ffffff !important;
+}
+
+/* Garante que os textos de suporte (subtítulos) não desapareçam */
+html:not(.dark) .text-gray-500 {
+  color: #6b7280 !important;
+}
+html.dark .text-gray-500 {
+  color: #9ca3af !important;
+}
+
+/* Ajuste sutil de bordas para os dois modos */
+html:not(.dark) .border-gray-100, 
+html:not(.dark) .border-gray-200 {
+  border-color: #e5e7eb !important;
+}
+html.dark .border-gray-100, 
+html.dark .border-gray-200 {
+  border-color: #1f2937 !important;
+}
+
+/* ==========================================================================
+   🛠️ CORREÇÃO EXCLUSIVA PARA AS AÇÕES RÁPIDAS E CARDS DE STATUS
+   ========================================================================== */
+
+/* No modo claro, permite que os gradientes e opacidades nativas funcionem sem o fundo cinza por cima */
+html:not(.dark) .bg-gradient-to-r,
+html:not(.dark) .bg-gradient-to-br {
+  background-color: transparent !important;
+}
+
+/* No modo escuro, suaviza o gradiente dos botões de tarefas para não sumir com o texto */
+html.dark .from-white.to-gray-50 {
+  background-image: linear-gradient(to right, #1a2654, #111c44) !important;
+}
+html.dark .hover\:from-gray-50.hover\:to-white:hover {
+  background-image: linear-gradient(to right, #111c44, #1a2654) !important;
 }
