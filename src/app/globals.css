@@ -24,3 +24,14 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+
+/* Tema escuro controlado por SystemPreferences */
+.modus-dark body { background: #0f172a; color: #e5e7eb; }
+.modus-dark .bg-white { background-color: #111827 !important; }
+.modus-dark .bg-gray-50 { background-color: #0f172a !important; }
+.modus-dark .text-gray-900 { color: #f9fafb !important; }
+.modus-dark .text-gray-800, .modus-dark .text-gray-700 { color: #e5e7eb !important; }
+.modus-dark .text-gray-600, .modus-dark .text-gray-500 { color: #9ca3af !important; }
+.modus-dark .border-gray-100, .modus-dark .border-gray-200, .modus-dark .border-gray-300 { border-color: #374151 !important; }
+.modus-dark input, .modus-dark select { background-color: #1f2937 !important; color: #f9fafb !important; }

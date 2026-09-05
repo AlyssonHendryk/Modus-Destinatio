@@ -7,8 +7,7 @@ import {
   Calendar,
   Edit,
   Save,
-  X,
-  Camera
+  X
 } from "lucide-react"
 
 export default function ProfileSection({ currentUser, setCurrentUser }) {
@@ -70,12 +69,6 @@ export default function ProfileSection({ currentUser, setCurrentUser }) {
             <div className="w-32 h-32 bg-gradient-to-br from-purple-600 to-orange-600 rounded-2xl flex items-center justify-center text-white text-4xl font-bold shadow-xl border-4 border-white select-none">
               {primeiraLetra}
             </div>
-            <button
-              type="button"
-              className="absolute bottom-0 right-0 w-10 h-10 bg-white rounded-xl shadow-lg flex items-center justify-center border border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer"
-            >
-              <Camera className="w-5 h-5 text-gray-600" />
-            </button>
           </div>
 
           <div className="flex-1 xl:pt-16">

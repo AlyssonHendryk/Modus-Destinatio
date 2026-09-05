@@ -1,208 +1,121 @@
-"use client";
+"use client"
 
-import React, { useState, useEffect } from 'react';
-import { X, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from "react"
+import { X, Plus, Trash2, Minus } from "lucide-react"
+import { formatCurrency } from "@/utils/formatters"
 
-export default function OrderModal({ isOpen, onClose, onSave, orderToEdit }) {
-  if (!isOpen) return null;
+export default function OrderModal({ isOpen, onClose, onSave, orderToEdit, inventory = [] }) {
+  const [id, setId] = useState("")
+  const [customer, setCustomer] = useState("")
+  const [supplier, setSupplier] = useState("")
+  const [operation, setOperation] = useState("Venda")
+  const [status, setStatus] = useState("waiting")
+  const [items, setItems] = useState([])
+  const [error, setError] = useState("")
 
-  const [id, setId] = useState('');
-  const [supplier, setSupplier] = useState('');
-  const [operation, setOperation] = useState('Venda');
-  const [status, setStatus] = useState('Aguardando');
-  const [items, setItems] = useState([]);
-
-  // Preenche se for edição
   useEffect(() => {
+    if (!isOpen) return
     if (orderToEdit) {
-      setId(orderToEdit.id);
-      setSupplier(orderToEdit.supplier);
-      setOperation(orderToEdit.operation);
-      setStatus(orderToEdit.status);
-      setItems(orderToEdit.items || []);
+      setId(orderToEdit.id)
+      setCustomer(orderToEdit.customer || "")
+      setSupplier(orderToEdit.supplier || "")
+      setOperation(orderToEdit.operation || "Venda")
+      setStatus(orderToEdit.status || "waiting")
+      setItems(orderToEdit.items || [])
     } else {
-      setId(`#${Math.floor(1000 + Math.random() * 9000)}`); // Gera ID aleatório temporário
-      setSupplier('');
-      setOperation('Venda');
-      setStatus('Aguardando');
-      setItems([]);
+      setId(`#${Date.now().toString().slice(-6)}`)
+      setCustomer("")
+      setSupplier("")
+      setOperation("Venda")
+      setStatus("waiting")
+      setItems([])
     }
-  }, [orderToEdit, isOpen]);
+    setError("")
+  }, [isOpen, orderToEdit])
 
-  const handleAddItem = () => {
-    setItems([...items, { productId: String(Math.floor(100 + Math.random() * 900)), product: '', quantity: 1, price: 'R$ 0,00' }]);
-  };
+  const total = useMemo(() => items.reduce((sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0), 0), [items])
 
-  const handleRemoveItem = (index) => {
-    setItems(items.filter((_, i) => i !== index));
-  };
+  if (!isOpen) return null
 
-  const handleItemChange = (index, field, value) => {
-    const updatedItems = [...items];
-    updatedItems[index][field] = value;
-    setItems(updatedItems);
-  };
+  function addItem() {
+    const first = inventory.find((p) => p.active !== false)
+    setItems((current) => [...current, {
+      productId: first?.id || `P${Date.now().toString().slice(-4)}`,
+      product: first?.name || "",
+      quantity: 1,
+      unitPrice: first?.unitPrice || 0,
+    }])
+  }
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  function removeItem(index) {
+    setItems((current) => current.filter((_, i) => i !== index))
+  }
 
-    // Calcular valor total baseado nos itens inseridos (opcional/básico)
-    let totalCalculated = "R$ 0,00";
-    if (items.length > 0) {
-      const sum = items.reduce((acc, item) => {
-        const numericPrice = parseFloat(item.price.replace('R$', '').replace('.', '').replace(',', '.').trim()) || 0;
-        return acc + (numericPrice * item.quantity);
-      }, 0);
-      totalCalculated = `R$ ${sum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+  function changeItem(index, patch) {
+    setItems((current) => current.map((item, i) => i === index ? { ...item, ...patch } : item))
+  }
+
+  function selectProduct(index, productId) {
+    const product = inventory.find((item) => item.id === productId)
+    if (!product) return
+    changeItem(index, { productId: product.id, product: product.name, unitPrice: product.unitPrice })
+  }
+
+  function changeQuantity(index, delta) {
+    const item = items[index]
+    if (!item) return
+    const product = inventory.find((p) => p.id === item.productId)
+    const next = Math.max(1, item.quantity + delta)
+    if (operation === "Venda" && product && next > product.quantity) {
+      setError(`Estoque insuficiente para ${product.name}. Disponível: ${product.quantity}.`)
+      return
     }
+    setError("")
+    changeItem(index, { quantity: next })
+  }
 
-    const today = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
-
-    onSave({
-      id,
-      supplier,
-      operation,
-      status,
-      date: orderToEdit ? orderToEdit.date : today,
-      total: totalCalculated !== "R$ 0,00" ? totalCalculated : (orderToEdit ? orderToEdit.total : "R$ 0,00"),
-      items
-    });
-  };
+  function handleSubmit(e) {
+    e.preventDefault()
+    if (!customer.trim() || !supplier.trim()) return setError("Informe cliente e fornecedor/origem.")
+    if (items.length === 0) return setError("Adicione pelo menos um item ao pedido.")
+    if (items.some((item) => !item.product.trim() || item.quantity < 1 || item.unitPrice < 0)) return setError("Revise os itens do pedido.")
+    if (operation === "Venda") {
+      const unavailable = items.find((item) => {
+        const product = inventory.find((p) => p.id === item.productId)
+        return product && item.quantity > product.quantity
+      })
+      if (unavailable) return setError(`Estoque insuficiente para ${unavailable.product}.`)
+    }
+    onSave?.({ id, customer: customer.trim(), supplier: supplier.trim(), operation, status, date: orderToEdit?.date || new Date().toLocaleDateString("pt-BR"), total, items })
+  }
 
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-all animate-fadeIn">
-      <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-6">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-100 pb-4">
-          <h2 className="text-xl font-bold text-gray-900">
-            {orderToEdit ? `Editar Pedido ${id}` : 'Criar Novo Pedido'}
-          </h2>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-xl transition-colors">
-            <X className="w-5 h-5" />
-          </button>
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-2xl border border-gray-100 max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-6">
+        <div className="flex items-center justify-between border-b border-gray-100 pb-4"><h2 className="text-xl font-bold text-gray-900">{orderToEdit ? `Editar Pedido ${id}` : "Criar Novo Pedido"}</h2><button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 text-gray-500 rounded-xl"><X className="w-5 h-5" /></button></div>
+        <div className="grid md:grid-cols-2 gap-4">
+          <label className="text-sm font-medium text-gray-700">Cliente<input value={customer} onChange={(e) => setCustomer(e.target.value)} className="mt-1 w-full border rounded-xl p-3 text-gray-900" placeholder="Nome do cliente" /></label>
+          <label className="text-sm font-medium text-gray-700">Fornecedor / origem<input value={supplier} onChange={(e) => setSupplier(e.target.value)} className="mt-1 w-full border rounded-xl p-3 text-gray-900" placeholder="Fornecedor ou canal" /></label>
+          <label className="text-sm font-medium text-gray-700">Operação<select value={operation} onChange={(e) => setOperation(e.target.value)} className="mt-1 w-full border rounded-xl p-3 bg-white text-gray-900"><option>Venda</option><option>Compra</option></select></label>
+          <label className="text-sm font-medium text-gray-700">Status<select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-1 w-full border rounded-xl p-3 bg-white text-gray-900"><option value="waiting">Aguardando</option><option value="separating">Em separação</option><option value="shipped">Em rota</option><option value="completed">Concluído</option><option value="cancelled">Cancelado</option></select></label>
         </div>
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Fornecedor</label>
-              <input
-                type="text"
-                required
-                placeholder="Ex: Coca Cola"
-                value={supplier}
-                onChange={(e) => setSupplier(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-medium"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Operação</label>
-                <select
-                  value={operation}
-                  onChange={(e) => setOperation(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-medium"
-                >
-                  <option value="Venda">Venda</option>
-                  <option value="Compra">Compra</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">Status</label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-medium"
-                >
-                  <option value="Aguardando">Aguardando</option>
-                  <option value="Em rota">Em rota</option>
-                  <option value="Concluído">Concluído</option>
-                  <option value="Cancelado">Cancelado</option>
-                </select>
-              </div>
-            </div>
+        <div>
+          <div className="flex items-center justify-between mb-3"><h3 className="font-semibold text-gray-900">Itens</h3><button type="button" onClick={addItem} className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded-lg"><Plus className="w-4 h-4" />Adicionar item</button></div>
+          <div className="space-y-3">
+            {items.length === 0 && <div className="text-sm text-gray-500 border border-dashed rounded-xl p-6 text-center">Nenhum item adicionado.</div>}
+            {items.map((item, index) => <div key={`${item.productId}-${index}`} className="grid grid-cols-12 gap-2 items-end border rounded-xl p-3">
+              <label className="col-span-12 md:col-span-5 text-xs text-gray-600">Produto
+                {inventory.length ? <select value={item.productId} onChange={(e) => selectProduct(index, e.target.value)} className="mt-1 w-full border rounded-lg p-2 bg-white text-gray-900">{inventory.filter((p) => p.active !== false).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.quantity} un)</option>)}</select> : <input value={item.product} onChange={(e) => changeItem(index, { product: e.target.value })} className="mt-1 w-full border rounded-lg p-2" />}
+              </label>
+              <div className="col-span-7 md:col-span-3"><p className="text-xs text-gray-600 mb-1">Quantidade</p><div className="flex items-center border rounded-lg"><button type="button" onClick={() => changeQuantity(index, -1)} className="p-2"><Minus className="w-4 h-4" /></button><input type="number" min="1" value={item.quantity} onChange={(e) => changeItem(index, { quantity: Math.max(1, Number(e.target.value) || 1) })} className="w-full text-center outline-none" /><button type="button" onClick={() => changeQuantity(index, 1)} className="p-2"><Plus className="w-4 h-4" /></button></div></div>
+              <label className="col-span-4 md:col-span-3 text-xs text-gray-600">Preço unitário<input type="number" min="0" step="0.01" value={item.unitPrice} onChange={(e) => changeItem(index, { unitPrice: Number(e.target.value) || 0 })} className="mt-1 w-full border rounded-lg p-2 text-gray-900" /></label>
+              <button type="button" onClick={() => removeItem(index)} className="col-span-1 p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+            </div>)}
           </div>
-
-          {/* Seção Itens do Pedido */}
-          <div className="border-t border-gray-100 pt-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Itens do Pedido</h3>
-              <button
-                type="button"
-                onClick={handleAddItem}
-                className="flex items-center gap-1.5 px-3 py-1.5 border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg text-xs font-medium transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" /> Adicionar Item
-              </button>
-            </div>
-
-            {items.length === 0 ? (
-              <p className="text-xs text-gray-400 text-center py-4 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                Nenhum item adicionado a este pedido ainda.
-              </p>
-            ) : (
-              <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                {items.map((item, index) => (
-                  <div key={index} className="flex items-center gap-2 bg-gray-50/50 p-2 border border-gray-100 rounded-xl">
-                    <input
-                      type="text"
-                      placeholder="Nome do produto"
-                      required
-                      value={item.product}
-                      onChange={(e) => handleItemChange(index, 'product', e.target.value)}
-                      className="flex-1 min-w-[120px] px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-orange-500 transition-all font-medium"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Qtd"
-                      min="1"
-                      required
-                      value={item.quantity}
-                      onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 1)}
-                      className="w-16 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-orange-500 transition-all text-center font-semibold"
-                    />
-                    <input
-                      type="text"
-                      placeholder="R$ 0,00"
-                      required
-                      value={item.price}
-                      onChange={(e) => handleItemChange(index, 'price', e.target.value)}
-                      className="w-24 px-2 py-1.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-orange-500 transition-all text-right font-semibold"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveItem(index)}
-                      className="p-2 hover:bg-red-50 text-red-500 hover:text-red-700 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Footer Ações */}
-          <div className="flex items-center justify-end gap-3 border-t border-gray-100 pt-4 mt-6">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-5 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 rounded-xl text-sm font-medium transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="px-5 py-2.5 bg-gradient-to-r from-[#F97316] to-[#FB923C] hover:from-[#EA580C] hover:to-[#F97316] text-white rounded-xl font-medium shadow-md hover:shadow-lg transition-all text-sm"
-            >
-              Salvar Pedido
-            </button>
-          </div>
-        </form>
-      </div>
+        </div>
+        {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">{error}</p>}
+        <div className="flex items-center justify-between border-t pt-4"><div><p className="text-xs text-gray-500">Total do pedido</p><p className="text-2xl font-bold text-gray-900">{formatCurrency(total)}</p></div><div className="flex gap-3"><button type="button" onClick={onClose} className="px-5 py-3 border rounded-xl text-gray-700">Cancelar</button><button type="submit" className="px-5 py-3 bg-gradient-to-r from-purple-600 to-orange-500 text-white rounded-xl font-medium">Salvar Pedido</button></div></div>
+      </form>
     </div>
-  );
+  )
 }

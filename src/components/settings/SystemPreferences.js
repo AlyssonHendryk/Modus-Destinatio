@@ -34,15 +34,23 @@ export default function SystemPreferences() {
 
   const [saved, setSaved] = useState(false)
 
+  useEffect(() => {
+    document.documentElement.classList.toggle("modus-dark", theme === "dark")
+  }, [theme])
+
   // Carrega as preferências salvas no navegador ao abrir a página
   useEffect(() => {
-    const preferences = localStorage.getItem("stockflow_preferences")
+    const preferences = localStorage.getItem("modusdestinatio_preferences")
 
     if (preferences) {
-      const data = JSON.parse(preferences)
-      setTheme(data.theme || "light")
-      setLanguage(data.language || "pt")
-      setNotifications(data.notifications || defaultPreferences.notifications)
+      try {
+        const data = JSON.parse(preferences)
+        setTheme(data.theme || "light")
+        setLanguage(data.language || "pt")
+        setNotifications(data.notifications || defaultPreferences.notifications)
+      } catch {
+        localStorage.removeItem("modusdestinatio_preferences")
+      }
     }
   }, [])
 
@@ -54,7 +62,7 @@ export default function SystemPreferences() {
     }
 
     localStorage.setItem(
-      "stockflow_preferences",
+      "modusdestinatio_preferences",
       JSON.stringify(preferences)
     )
 
@@ -71,7 +79,7 @@ export default function SystemPreferences() {
     setNotifications(defaultPreferences.notifications)
 
     localStorage.setItem(
-      "stockflow_preferences",
+      "modusdestinatio_preferences",
       JSON.stringify(defaultPreferences)
     )
   }
@@ -152,7 +160,6 @@ export default function SystemPreferences() {
             className="w-full p-3 rounded-xl border border-gray-300 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
           >
             <option value="pt">Português</option>
-            <option value="en">English</option>
           </select>
         </div>
 
