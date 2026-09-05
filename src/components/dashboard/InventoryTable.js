@@ -1,141 +1,66 @@
 "use client"
 
-import {
-  AlertTriangle,
-  TrendingUp,
-  TrendingDown,
-} from "lucide-react"
+import { useMemo, useState } from "react"
+import { AlertTriangle, Plus, Minus, Trash2, Edit2, Save, X } from "lucide-react"
+import { useApp } from "@/context/AppContext"
+import { formatCurrency } from "@/utils/formatters"
 
-export default function InventoryTable({ items = [] }) {
+export default function InventoryTable({ compact = false, search = "" }) {
+  const { inventory, saveProduct, deleteProduct, changeStock } = useApp()
+  const [editing, setEditing] = useState(null)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ name: "", quantity: 0, max: 100, min: 10, unitPrice: 0, active: true })
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const filtered = q ? inventory.filter((item) => item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)) : inventory
+    return compact ? filtered.slice(0, 5) : filtered
+  }, [compact, inventory, search])
 
-  const getStockLevel = (quantity, max) => {
-    const percentage = (quantity / max) * 100
+  function openCreate() {
+    setEditing(null)
+    setForm({ name: "", quantity: 0, max: 100, min: 10, unitPrice: 0, active: true })
+    setShowForm(true)
+  }
 
-    if (percentage < 30) {
-      return {
-        color: "bg-red-500 dark:bg-red-500",
-        level: "low",
-        label: "Baixo",
-        text: "text-red-600 dark:text-red-400",
-        border: "border-red-300 dark:border-red-900/60",
-        indicatorColor: "bg-red-500"
-      }
-    }
+  function openEdit(item) {
+    setEditing(item.id)
+    setForm(item)
+    setShowForm(true)
+  }
 
-    if (percentage < 60) {
-      return {
-        color: "bg-amber-500 dark:bg-amber-500",
-        level: "medium",
-        label: "Médio",
-        text: "text-amber-500 dark:text-amber-400",
-        border: "border-amber-300 dark:border-amber-900/60",
-        indicatorColor: "bg-amber-500"
-      }
-    }
-
-    return {
-      color: "bg-green-500 dark:bg-green-500",
-      level: "high",
-      label: "Alto",
-      text: "text-green-600 dark:text-green-400",
-      border: "border-green-300 dark:border-green-800/60",
-      indicatorColor: "bg-green-500"
-    }
+  function submit(e) {
+    e.preventDefault()
+    if (!form.name.trim()) return
+    saveProduct({ ...form, id: editing || undefined })
+    setShowForm(false)
+    setEditing(null)
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors duration-200">
-
-      {/* Header */}
-      <div className="mb-6">
-        <h2 className="text-gray-900 dark:text-white font-bold text-lg mb-1">
-          Itens Armazenados
-        </h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Status do estoque
-        </p>
+    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+      <div className="flex items-center justify-between mb-6">
+        <div><h2 className="text-gray-900 font-semibold mb-1">Itens Armazenados</h2><p className="text-sm text-gray-500">Status e movimentação do estoque</p></div>
+        {!compact && <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl"><Plus className="w-4 h-4" />Novo produto</button>}
       </div>
 
-      {/* Lista Dinâmica */}
-      <div className="space-y-8">
-        {items.length === 0 ? (
-          <p className="text-sm text-gray-400 text-center py-4">Nenhum item em estoque encontrado.</p>
-        ) : (
-          items.map((item) => {
-            const stockLevel = getStockLevel(item.quantity, item.max)
-            const percentage = Math.min(100, Math.max(0, (item.quantity / item.max) * 100))
+      {showForm && !compact && <form onSubmit={submit} className="mb-6 border rounded-xl p-4 grid md:grid-cols-6 gap-3 bg-gray-50">
+        <input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Produto" className="md:col-span-2 border rounded-lg p-2 text-gray-900" />
+        <input type="number" min="0" value={form.quantity} onChange={e=>setForm({...form,quantity:Number(e.target.value)})} placeholder="Qtd." className="border rounded-lg p-2 text-gray-900" />
+        <input type="number" min="1" value={form.max} onChange={e=>setForm({...form,max:Number(e.target.value)})} placeholder="Máx." className="border rounded-lg p-2 text-gray-900" />
+        <input type="number" min="0" value={form.min} onChange={e=>setForm({...form,min:Number(e.target.value)})} placeholder="Mín." className="border rounded-lg p-2 text-gray-900" />
+        <input type="number" min="0" step="0.01" value={form.unitPrice} onChange={e=>setForm({...form,unitPrice:Number(e.target.value)})} placeholder="Preço" className="border rounded-lg p-2 text-gray-900" />
+        <div className="md:col-span-6 flex justify-end gap-2"><button type="button" onClick={()=>setShowForm(false)} className="px-3 py-2 border rounded-lg flex items-center gap-1"><X className="w-4 h-4"/>Cancelar</button><button type="submit" className="px-3 py-2 bg-purple-600 text-white rounded-lg flex items-center gap-1"><Save className="w-4 h-4"/>Salvar</button></div>
+      </form>}
 
-            return (
-              <div key={item.name} className="space-y-2">
-                
-                {/* Nome do Item */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-gray-900 dark:text-gray-100 font-bold text-base tracking-tight">
-                      {item.name}
-                    </span>
-                    {stockLevel.level === "low" && (
-                      <AlertTriangle className="w-4 h-4 text-red-500 dark:text-red-400" />
-                    )}
-                  </div>
-                </div>
-
-                {/* Área da Barra com Bloco Flutuante Unificado */}
-                <div className="relative pt-7 pb-2 overflow-visible">
-                  
-                  {/* 🛠️ SOLUÇÃO: Bloco único absoluto. O min-w-[80px] e o flex-col impedem o texto de sumir ou colapsar */}
-                  <div 
-                    className="absolute top-0 flex flex-col items-center min-w-[80px] transition-all duration-300 -translate-x-1/2 z-10 select-none"
-                    style={{ left: `${percentage}%` }}
-                  >
-                    {/* Texto + Seta na mesma linha horizontal */}
-                    <div className="flex items-center justify-center gap-1 w-full text-center">
-                      <span className="text-sm font-black text-gray-900 dark:text-white tracking-tight">
-                        {item.quantity} un
-                      </span>
-                      {item.trend === "up" ? (
-                        <TrendingUp className="w-4 h-4 text-green-500 font-bold shrink-0" />
-                      ) : (
-                        <TrendingDown className="w-4 h-4 text-red-500 font-bold shrink-0" />
-                      )}
-                    </div>
-
-                    {/* Pino indicador posicionado logo abaixo do texto e acima da barra */}
-                    <div className={`w-[2px] h-2 ${stockLevel.indicatorColor} mt-1`} />
-                  </div>
-
-                  {/* Barra de Progresso */}
-                  <div className="relative h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className={`absolute inset-y-0 left-0 ${stockLevel.color} rounded-full transition-all duration-300`}
-                      style={{ width: `${percentage}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Rodapé */}
-                <div className="flex items-center justify-between text-xs pt-1">
-                  <span className="text-gray-400 dark:text-gray-500 font-semibold">
-                    0
-                  </span>
-
-                  <span
-                    className={`px-3 py-0.5 rounded-full font-bold border bg-transparent transition-colors ${stockLevel.text} ${stockLevel.border}`}
-                  >
-                    {stockLevel.label}
-                  </span>
-
-                  <span className="text-gray-400 dark:text-gray-500 font-semibold">
-                    {item.max}
-                  </span>
-                </div>
-
-              </div>
-            )
-          })
-        )}
-      </div>
-
+      <div className="space-y-4">{visible.map(item => {
+        const percentage = Math.min(100, (item.quantity / Math.max(1,item.max))*100)
+        const low = item.quantity <= item.min
+        return <div key={item.id} className="border rounded-xl p-4">
+          <div className="flex items-center justify-between gap-3 mb-2"><div><div className="flex items-center gap-2"><span className="font-medium text-gray-900">{item.name}</span>{low&&<AlertTriangle className="w-4 h-4 text-red-500"/>}</div><p className="text-xs text-gray-500">{item.id} • {formatCurrency(item.unitPrice)}</p></div><div className="flex items-center gap-2"><button onClick={()=>changeStock(item.id,-1)} className="p-2 border rounded-lg" title="Diminuir"><Minus className="w-4 h-4"/></button><span className="min-w-16 text-center text-sm font-semibold text-gray-900">{item.quantity} un</span><button onClick={()=>changeStock(item.id,1)} className="p-2 border rounded-lg" title="Aumentar"><Plus className="w-4 h-4"/></button>{!compact&&<><button onClick={()=>openEdit(item)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4"/></button><button onClick={()=>window.confirm(`Excluir ${item.name}?`)&&deleteProduct(item.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button></>}</div></div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden"><div className={`${low ? "bg-red-500" : percentage < 60 ? "bg-yellow-500" : "bg-green-500"} h-full rounded-full`} style={{width:`${percentage}%`}} /></div>
+          <div className="flex justify-between text-xs text-gray-500 mt-1"><span>Mín. {item.min}</span><span>Máx. {item.max}</span></div>
+        </div>
+      })}</div>
     </div>
   )
 }

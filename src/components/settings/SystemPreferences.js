@@ -22,6 +22,7 @@ export default function SystemPreferences() {
     }
   }
 
+  // Substituído o hook do Context pelo estado local do React
   const [theme, setTheme] = useState("light")
   const [language, setLanguage] = useState("pt")
   const [notifications, setNotifications] = useState({
@@ -33,42 +34,25 @@ export default function SystemPreferences() {
 
   const [saved, setSaved] = useState(false)
 
-  // Função auxiliar para aplicar o tema injetando/removendo a classe .dark na tag <html>
-  const applyTheme = (selectedTheme) => {
-    if (typeof window !== "undefined") {
-      const root = window.document.documentElement
-      
-      if (selectedTheme === "dark") {
-        root.classList.add("dark")
-      } else {
-        root.classList.remove("dark")
-      }
-    }
-  }
-
-  // Carrega as preferências salvas ao abrir a página e aplica o tema ativo
   useEffect(() => {
-    const preferences = localStorage.getItem("modus_preferences")
+    document.documentElement.classList.toggle("modus-dark", theme === "dark")
+  }, [theme])
+
+  // Carrega as preferências salvas no navegador ao abrir a página
+  useEffect(() => {
+    const preferences = localStorage.getItem("modusdestinatio_preferences")
 
     if (preferences) {
-      const data = JSON.parse(preferences)
-      const currentTheme = data.theme || "light"
-      
-      setTheme(currentTheme)
-      setLanguage(data.language || "pt")
-      setNotifications(data.notifications || defaultPreferences.notifications)
-      
-      applyTheme(currentTheme)
-    } else {
-      applyTheme("light")
+      try {
+        const data = JSON.parse(preferences)
+        setTheme(data.theme || "light")
+        setLanguage(data.language || "pt")
+        setNotifications(data.notifications || defaultPreferences.notifications)
+      } catch {
+        localStorage.removeItem("modusdestinatio_preferences")
+      }
     }
   }, [])
-
-  // Modifica o tema em tempo real ao clicar nos botões Claro/Escuro
-  const handleThemeChange = (newTheme) => {
-    setTheme(newTheme)
-    applyTheme(newTheme)
-  }
 
   const handleSave = () => {
     const preferences = {
@@ -78,7 +62,7 @@ export default function SystemPreferences() {
     }
 
     localStorage.setItem(
-      "modus_preferences",
+      "modusdestinatio_preferences",
       JSON.stringify(preferences)
     )
 
@@ -93,11 +77,9 @@ export default function SystemPreferences() {
     setTheme(defaultPreferences.theme)
     setLanguage(defaultPreferences.language)
     setNotifications(defaultPreferences.notifications)
-    
-    applyTheme(defaultPreferences.theme)
 
     localStorage.setItem(
-      "modus_preferences",
+      "modusdestinatio_preferences",
       JSON.stringify(defaultPreferences)
     )
   }
@@ -121,7 +103,7 @@ export default function SystemPreferences() {
           <h3 className="text-lg font-semibold text-gray-900">
             Preferências
           </h3>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-700">
             Personalize sua experiência no sistema
           </p>
         </div>
@@ -132,34 +114,30 @@ export default function SystemPreferences() {
         {/* Tema */}
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <Palette className="w-4 h-4 text-gray-500" />
-            <label className="text-sm font-semibold text-gray-900">
+            <Palette className="w-4 h-4 text-gray-600" />
+            <label className="text-sm font-medium text-gray-800">
               Tema
             </label>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            {/* 🛠️ MUDANÇA: Quando inativo, ele usa bg-transparent e força a borda gray-300 visível no Modo Claro */}
             <button
-              type="button"
-              onClick={() => handleThemeChange("light")}
-              className={`py-3 rounded-xl border font-semibold transition-all cursor-pointer ${
+              onClick={() => setTheme("light")}
+              className={`py-3 rounded-xl border font-medium transition-all cursor-pointer ${
                 theme === "light"
                   ? "bg-gradient-to-r from-purple-500 to-purple-600 text-white border-purple-600 shadow-lg"
-                  : "bg-transparent text-gray-500 border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  : "bg-white text-gray-800 border-gray-300 hover:bg-gray-50"
               }`}
             >
               ☀️ Claro
             </button>
 
-            {/* 🛠️ MUDANÇA: Ajustado botão Escuro seguindo o mesmo padrão do Claro */}
             <button
-              type="button"
-              onClick={() => handleThemeChange("dark")}
-              className={`py-3 rounded-xl border font-semibold transition-all cursor-pointer ${
+              onClick={() => setTheme("dark")}
+              className={`py-3 rounded-xl border font-medium transition-all cursor-pointer ${
                 theme === "dark"
                   ? "bg-gradient-to-r from-purple-500 to-purple-600 text-white border-purple-600 shadow-lg"
-                  : "bg-transparent text-gray-500 border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  : "bg-white text-gray-800 border-gray-300 hover:bg-gray-50"
               }`}
             >
               🌙 Escuro
@@ -170,28 +148,26 @@ export default function SystemPreferences() {
         {/* Idioma */}
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <Globe className="w-4 h-4 text-gray-500" />
-            <label className="text-sm font-semibold text-gray-900">
+            <Globe className="w-4 h-4 text-gray-600" />
+            <label className="text-sm font-medium text-gray-800">
               Idioma
             </label>
           </div>
 
-          {/* 🛠️ MUDANÇA: Adicionado border-gray-300 para o select não ficar invisível no claro */}
           <select
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
-            className="w-full p-3 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 cursor-pointer font-medium"
+            className="w-full p-3 rounded-xl border border-gray-300 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
           >
             <option value="pt">Português</option>
-            <option value="en">English</option>
           </select>
         </div>
 
         {/* Notificações */}
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <Bell className="w-4 h-4 text-gray-500" />
-            <label className="text-sm font-semibold text-gray-900">
+            <Bell className="w-4 h-4 text-gray-600" />
+            <label className="text-sm font-medium text-gray-800">
               Notificações
             </label>
           </div>
@@ -207,18 +183,17 @@ export default function SystemPreferences() {
                 key={item.key}
                 className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-200"
               >
-                <span className="text-sm font-semibold text-gray-900">
+                <span className="text-sm font-medium text-gray-800">
                   {item.label}
                 </span>
 
-                {/* Switch Toggle Animado */}
                 <button
                   type="button"
                   onClick={() => toggleNotification(item.key)}
                   className={`relative w-12 h-6 rounded-full transition-all cursor-pointer ${
                     notifications[item.key]
                       ? "bg-gradient-to-r from-purple-500 to-purple-600"
-                      : "bg-gray-300 dark:bg-gray-600"
+                      : "bg-gray-300"
                   }`}
                 >
                   <div
@@ -236,13 +211,13 @@ export default function SystemPreferences() {
         {saved && (
           <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-xl">
             <CheckCircle className="w-5 h-5 text-green-600" />
-            <span className="text-sm font-semibold text-green-700">
+            <span className="text-sm font-medium text-green-700">
               Preferências salvas com sucesso!
             </span>
           </div>
         )}
 
-        {/* Botões do Rodapé */}
+        {/* Botões */}
         <div className="flex gap-3 pt-2">
           <button
             onClick={handleSave}
@@ -254,7 +229,7 @@ export default function SystemPreferences() {
 
           <button
             onClick={handleReset}
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-700 text-gray-700 bg-transparent hover:bg-gray-50 transition-all cursor-pointer font-medium"
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-gray-300 text-gray-800 hover:bg-gray-50 transition-all cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" />
             Restaurar

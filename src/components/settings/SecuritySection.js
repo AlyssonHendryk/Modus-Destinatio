@@ -133,7 +133,7 @@ export default function SecuritySection({ onUpdatePassword }) {
             <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Senha Atual</label>
             <input
               type="password"
-              placeholder="Digite a senha atual (padrão: 123)"
+              placeholder="Digite a senha atual"
               value={currentPasswordInput}
               onChange={(e) => setCurrentPasswordInput(e.target.value)}
               className="w-full p-3 bg-transparent border border-gray-300 dark:border-gray-600 rounded-xl text-sm text-gray-900 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/30 transition-all font-medium"

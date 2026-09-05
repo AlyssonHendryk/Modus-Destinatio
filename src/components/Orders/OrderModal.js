@@ -1,150 +1,121 @@
-"use client";
+"use client"
 
-import React, { useState, useEffect } from 'react';
-import { X, Plus, Trash2, CheckCircle, XCircle, Clock, Truck, ChevronDown } from 'lucide-react';
+import { useEffect, useMemo, useState } from "react"
+import { X, Plus, Trash2, Minus } from "lucide-react"
+import { formatCurrency } from "@/utils/formatters"
 
-export default function OrderModal({ isOpen, onClose, onSave, orderToEdit, availableProducts = [], availableSuppliers = [] }) {
-  if (!isOpen) return null;
-
-  const [id, setId] = useState('');
-  const [supplier, setSupplier] = useState('');
-  const [operation, setOperation] = useState('Venda');
-  const [status, setStatus] = useState('Aguardando');
-  const [items, setItems] = useState([]);
-
-  const [isStatusOpen, setIsStatusOpen] = useState(false);
-  const [isOperationOpen, setIsOperationOpen] = useState(false);
+export default function OrderModal({ isOpen, onClose, onSave, orderToEdit, inventory = [] }) {
+  const [id, setId] = useState("")
+  const [customer, setCustomer] = useState("")
+  const [supplier, setSupplier] = useState("")
+  const [operation, setOperation] = useState("Venda")
+  const [status, setStatus] = useState("waiting")
+  const [items, setItems] = useState([])
+  const [error, setError] = useState("")
 
   useEffect(() => {
-    const defaultSupplier = availableSuppliers[0] || "Nenhum fornecedor cadastrado";
+    if (!isOpen) return
     if (orderToEdit) {
-      setId(orderToEdit.id);
-      setSupplier(orderToEdit.supplier || defaultSupplier);
-      setOperation(orderToEdit.operation);
-      setStatus(orderToEdit.status);
-      setItems(orderToEdit.items || []);
+      setId(orderToEdit.id)
+      setCustomer(orderToEdit.customer || "")
+      setSupplier(orderToEdit.supplier || "")
+      setOperation(orderToEdit.operation || "Venda")
+      setStatus(orderToEdit.status || "waiting")
+      setItems(orderToEdit.items || [])
     } else {
-      setId(`#${Math.floor(1000 + Math.random() * 9000)}`);
-      setSupplier(defaultSupplier);
-      setOperation('Venda');
-      setStatus('Aguardando');
-      setItems([]);
+      setId(`#${Date.now().toString().slice(-6)}`)
+      setCustomer("")
+      setSupplier("")
+      setOperation("Venda")
+      setStatus("waiting")
+      setItems([])
     }
-  }, [orderToEdit, isOpen, availableSuppliers]);
+    setError("")
+  }, [isOpen, orderToEdit])
 
-  const handleAddItem = () => {
-    const defaultProduct = availableProducts[0] || { id: "101", name: "Item Padrão" };
-    setItems([...items, { productId: String(defaultProduct.id), product: defaultProduct.name, quantity: 1, price: 'R$ 0,00' }]);
-  };
+  const total = useMemo(() => items.reduce((sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0), 0), [items])
 
-  const handleRemoveItem = (index) => setItems(items.filter((_, i) => i !== index));
-  const handleItemChange = (index, field, value) => { const updatedItems = [...items]; updatedItems[index][field] = value; setItems(updatedItems); };
-  const handleProductSelect = (index, productId) => {
-    const selected = availableProducts.find(p => String(p.id) === String(productId));
-    if (selected) {
-      const updatedItems = [...items];
-      updatedItems[index].productId = String(selected.id);
-      updatedItems[index].product = selected.name;
-      setItems(updatedItems);
+  if (!isOpen) return null
+
+  function addItem() {
+    const first = inventory.find((p) => p.active !== false)
+    setItems((current) => [...current, {
+      productId: first?.id || `P${Date.now().toString().slice(-4)}`,
+      product: first?.name || "",
+      quantity: 1,
+      unitPrice: first?.unitPrice || 0,
+    }])
+  }
+
+  function removeItem(index) {
+    setItems((current) => current.filter((_, i) => i !== index))
+  }
+
+  function changeItem(index, patch) {
+    setItems((current) => current.map((item, i) => i === index ? { ...item, ...patch } : item))
+  }
+
+  function selectProduct(index, productId) {
+    const product = inventory.find((item) => item.id === productId)
+    if (!product) return
+    changeItem(index, { productId: product.id, product: product.name, unitPrice: product.unitPrice })
+  }
+
+  function changeQuantity(index, delta) {
+    const item = items[index]
+    if (!item) return
+    const product = inventory.find((p) => p.id === item.productId)
+    const next = Math.max(1, item.quantity + delta)
+    if (operation === "Venda" && product && next > product.quantity) {
+      setError(`Estoque insuficiente para ${product.name}. Disponível: ${product.quantity}.`)
+      return
     }
-  };
+    setError("")
+    changeItem(index, { quantity: next })
+  }
 
-  const getStatusStyles = (targetStatus) => {
-    switch (targetStatus) {
-      case "Concluído": return { text: "text-green-600 dark:text-green-400", border: "border-green-300 dark:border-green-800/60", icon: CheckCircle };
-      case "Cancelado": return { text: "text-red-600 dark:text-red-400", border: "border-red-300 dark:border-red-800/60", icon: XCircle };
-      case "Em rota": return { text: "text-blue-600 dark:text-blue-400", border: "border-blue-300 dark:border-blue-800/60", icon: Truck };
-      default: return { text: "text-amber-500 dark:text-amber-400", border: "border-amber-300 dark:border-amber-800/60", icon: Clock };
+  function handleSubmit(e) {
+    e.preventDefault()
+    if (!customer.trim() || !supplier.trim()) return setError("Informe cliente e fornecedor/origem.")
+    if (items.length === 0) return setError("Adicione pelo menos um item ao pedido.")
+    if (items.some((item) => !item.product.trim() || item.quantity < 1 || item.unitPrice < 0)) return setError("Revise os itens do pedido.")
+    if (operation === "Venda") {
+      const unavailable = items.find((item) => {
+        const product = inventory.find((p) => p.id === item.productId)
+        return product && item.quantity > product.quantity
+      })
+      if (unavailable) return setError(`Estoque insuficiente para ${unavailable.product}.`)
     }
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    let totalCalculated = "R$ 0,00";
-    if (items.length > 0) {
-      const sum = items.reduce((acc, item) => {
-        const numericPrice = parseFloat(item.price.replace('R$', '').replace('.', '').replace(',', '.').trim()) || 0;
-        return acc + (numericPrice * item.quantity);
-      }, 0);
-      totalCalculated = `R$ ${sum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-    }
-    const today = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
-    onSave({ id, supplier, operation, status, date: orderToEdit ? orderToEdit.date : today, total: totalCalculated !== "R$ 0,00" ? totalCalculated : (orderToEdit ? orderToEdit.total : "R$ 0,00"), items });
-  };
-
-  const currentStatusConfig = getStatusStyles(status);
-  const StatusIcon = currentStatusConfig.icon;
+    onSave?.({ id, customer: customer.trim(), supplier: supplier.trim(), operation, status, date: orderToEdit?.date || new Date().toLocaleDateString("pt-BR"), total, items })
+  }
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-all">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-6">
-        <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-4">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">{orderToEdit ? `Editar ${id}` : 'Registrar Fluxo'}</h2>
-          <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 rounded-xl"><X className="w-5 h-5" /></button>
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-2xl border border-gray-100 max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-6">
+        <div className="flex items-center justify-between border-b border-gray-100 pb-4"><h2 className="text-xl font-bold text-gray-900">{orderToEdit ? `Editar Pedido ${id}` : "Criar Novo Pedido"}</h2><button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 text-gray-500 rounded-xl"><X className="w-5 h-5" /></button></div>
+        <div className="grid md:grid-cols-2 gap-4">
+          <label className="text-sm font-medium text-gray-700">Cliente<input value={customer} onChange={(e) => setCustomer(e.target.value)} className="mt-1 w-full border rounded-xl p-3 text-gray-900" placeholder="Nome do cliente" /></label>
+          <label className="text-sm font-medium text-gray-700">Fornecedor / origem<input value={supplier} onChange={(e) => setSupplier(e.target.value)} className="mt-1 w-full border rounded-xl p-3 text-gray-900" placeholder="Fornecedor ou canal" /></label>
+          <label className="text-sm font-medium text-gray-700">Operação<select value={operation} onChange={(e) => setOperation(e.target.value)} className="mt-1 w-full border rounded-xl p-3 bg-white text-gray-900"><option>Venda</option><option>Compra</option></select></label>
+          <label className="text-sm font-medium text-gray-700">Status<select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-1 w-full border rounded-xl p-3 bg-white text-gray-900"><option value="waiting">Aguardando</option><option value="separating">Em separação</option><option value="shipped">Em rota</option><option value="completed">Concluído</option><option value="cancelled">Cancelado</option></select></label>
         </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Layout corrigido: Grid principal em 2 colunas */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Entidade / Fornecedor</label>
-              <select value={supplier} onChange={(e) => setSupplier(e.target.value)} className="w-full px-4 py-2.5 bg-transparent border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-orange-500/20">
-                {availableSuppliers.map((sup) => <option key={sup} value={sup}>{sup}</option>)}
-              </select>
-            </div>
-
-            {/* Sub-grid para Operação e Status ficarem alinhados lado a lado */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="relative">
-                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Operação</label>
-                <button type="button" onClick={() => setIsOperationOpen(!isOperationOpen)} className="w-full flex items-center justify-between px-3 py-2.5 bg-transparent border border-gray-300 dark:border-gray-600 rounded-xl font-bold text-sm">
-                  <span className={operation === "Compra" ? "text-blue-600" : "text-purple-600"}>{operation}</span>
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-                {isOperationOpen && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border rounded-xl shadow-xl z-50">
-                    {["Venda", "Compra"].map(op => <button key={op} type="button" onClick={() => { setOperation(op); setIsOperationOpen(false); }} className="w-full text-left px-4 py-2 text-sm">{op}</button>)}
-                  </div>
-                )}
-              </div>
-              <div className="relative">
-                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Status</label>
-                <button type="button" onClick={() => setIsStatusOpen(!isStatusOpen)} className="w-full flex items-center justify-between px-3 py-2.5 bg-transparent border border-gray-300 dark:border-gray-600 rounded-xl text-sm">
-                  <span className={`flex items-center gap-1 ${currentStatusConfig.text}`}><StatusIcon className="w-3.5 h-3.5"/> {status}</span>
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-                {isStatusOpen && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border rounded-xl shadow-xl z-50 p-1">
-                    {["Aguardando", "Em rota", "Concluído", "Cancelado"].map(st => <button key={st} type="button" onClick={() => { setStatus(st); setIsStatusOpen(false); }} className="w-full px-2 py-1.5 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">{st}</button>)}
-                  </div>
-                )}
-              </div>
-            </div>
+        <div>
+          <div className="flex items-center justify-between mb-3"><h3 className="font-semibold text-gray-900">Itens</h3><button type="button" onClick={addItem} className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded-lg"><Plus className="w-4 h-4" />Adicionar item</button></div>
+          <div className="space-y-3">
+            {items.length === 0 && <div className="text-sm text-gray-500 border border-dashed rounded-xl p-6 text-center">Nenhum item adicionado.</div>}
+            {items.map((item, index) => <div key={`${item.productId}-${index}`} className="grid grid-cols-12 gap-2 items-end border rounded-xl p-3">
+              <label className="col-span-12 md:col-span-5 text-xs text-gray-600">Produto
+                {inventory.length ? <select value={item.productId} onChange={(e) => selectProduct(index, e.target.value)} className="mt-1 w-full border rounded-lg p-2 bg-white text-gray-900">{inventory.filter((p) => p.active !== false).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.quantity} un)</option>)}</select> : <input value={item.product} onChange={(e) => changeItem(index, { product: e.target.value })} className="mt-1 w-full border rounded-lg p-2" />}
+              </label>
+              <div className="col-span-7 md:col-span-3"><p className="text-xs text-gray-600 mb-1">Quantidade</p><div className="flex items-center border rounded-lg"><button type="button" onClick={() => changeQuantity(index, -1)} className="p-2"><Minus className="w-4 h-4" /></button><input type="number" min="1" value={item.quantity} onChange={(e) => changeItem(index, { quantity: Math.max(1, Number(e.target.value) || 1) })} className="w-full text-center outline-none" /><button type="button" onClick={() => changeQuantity(index, 1)} className="p-2"><Plus className="w-4 h-4" /></button></div></div>
+              <label className="col-span-4 md:col-span-3 text-xs text-gray-600">Preço unitário<input type="number" min="0" step="0.01" value={item.unitPrice} onChange={(e) => changeItem(index, { unitPrice: Number(e.target.value) || 0 })} className="mt-1 w-full border rounded-lg p-2 text-gray-900" /></label>
+              <button type="button" onClick={() => removeItem(index)} className="col-span-1 p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+            </div>)}
           </div>
-
-          {/* Seção Itens */}
-          <div className="border-t pt-4">
-             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs font-bold text-gray-500 uppercase">Lotes Movimentados</h3>
-              <button type="button" onClick={handleAddItem} className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold">+ Vincular</button>
-            </div>
-            {items.map((item, index) => (
-              <div key={index} className="flex items-center gap-2 mb-2 p-2 border rounded-xl">
-                <select value={item.productId} onChange={(e) => handleProductSelect(index, e.target.value)} className="flex-1 bg-transparent text-sm border-none">
-                  {availableProducts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                <input type="number" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', e.target.value)} className="w-16 text-sm border-none text-center" />
-                <button type="button" onClick={() => handleRemoveItem(index)} className="text-red-500"><Trash2 className="w-4 h-4" /></button>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <button type="button" onClick={onClose} className="px-5 py-2.5 border rounded-xl text-sm">Cancelar</button>
-            <button type="submit" className="px-5 py-2.5 bg-orange-600 text-white rounded-xl font-bold text-sm">Salvar Operação</button>
-          </div>
-        </form>
-      </div>
+        </div>
+        {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">{error}</p>}
+        <div className="flex items-center justify-between border-t pt-4"><div><p className="text-xs text-gray-500">Total do pedido</p><p className="text-2xl font-bold text-gray-900">{formatCurrency(total)}</p></div><div className="flex gap-3"><button type="button" onClick={onClose} className="px-5 py-3 border rounded-xl text-gray-700">Cancelar</button><button type="submit" className="px-5 py-3 bg-gradient-to-r from-purple-600 to-orange-500 text-white rounded-xl font-medium">Salvar Pedido</button></div></div>
+      </form>
     </div>
-  );
+  )
 }
