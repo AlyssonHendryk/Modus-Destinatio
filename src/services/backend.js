@@ -1,51 +1,174 @@
-/**
- * PONTO CENTRAL DE INTEGRAÇÃO COM O BACKEND PYTHON.
- *
- * Hoje o frontend usa localStorage pelo AppContext para funcionar sem servidor.
- * Quando o backend Python estiver pronto:
- * 1) defina NEXT_PUBLIC_API_URL (ex.: http://localhost:8000/api)
- * 2) substitua as operações locais do AppContext pelas funções abaixo
- * 3) mantenha os mesmos formatos de objeto usados no frontend.
- *
- * Rotas sugeridas no Python/FastAPI:
- * GET/POST        /orders
- * PUT/DELETE      /orders/{id}
- * GET/POST        /products
- * PUT/DELETE      /products/{id}
- * POST            /auth/login
- * POST            /auth/register
- * GET/PUT/DELETE  /users/{id}
- */
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"
+const statusToBackend = {
+  waiting: "Aguardando",
+  separating: "Em separação",
+  shipped: "Em rota",
+  completed: "Concluído",
+  cancelled: "Cancelado",
+}
 
-async function request(path, options = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
+const statusFromBackend = {
+  Aguardando: "waiting",
+  "Em separação": "separating",
+  "Em rota": "shipped",
+  Concluído: "completed",
+  Cancelado: "cancelled",
+}
+
+function parseMoney(value) {
+  if (typeof value === "number") return value
+
+  if (!value) return 0
+
+  return Number(
+    String(value)
+      .replace("R$", "")
+      .replace(/\./g, "")
+      .replace(",", ".")
+      .trim()
+  ) || 0
+}
+
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  })
+}
+
+function toBackendOrder(order) {
+  return {
+    id: order.id,
+    supplier: order.supplier || order.customer || "",
+    operation: order.operation || "Venda",
+
+    status:
+      statusToBackend[order.status] ||
+      order.status ||
+      "Aguardando",
+
+    date: order.date || new Date().toLocaleDateString("pt-BR"),
+
+    total: formatMoney(order.total),
+
+    items: (order.items || []).map((item) => ({
+      productId: String(
+        item.productId ||
+        item.id ||
+        ""
+      ),
+
+      product:
+        item.product ||
+        item.name ||
+        "",
+
+      quantity: Number(item.quantity) || 1,
+
+      price: formatMoney(
+        item.unitPrice ??
+        item.price ??
+        0
+      ),
+    })),
+  }
+}
+
+function fromBackendOrder(order) {
+  return {
+    ...order,
+
+    status:
+      statusFromBackend[order.status] ||
+      order.status,
+
+    total: parseMoney(order.total),
+
+    items: (order.items || []).map((item) => ({
+      ...item,
+
+      id: item.productId,
+
+      unitPrice: parseMoney(item.price),
+
+      price: parseMoney(item.price),
+    })),
+  }
+}
+
+async function request(endpoint, options = {}) {
+  const response = await fetch(`${API_URL}${endpoint}`, {
     ...options,
+
     headers: {
       "Content-Type": "application/json",
-      ...(options.headers || {}),
+      ...options.headers,
     },
   })
 
   if (!response.ok) {
-    const message = await response.text().catch(() => "")
-    throw new Error(message || `Erro HTTP ${response.status}`)
+    let message = "Erro ao comunicar com o backend."
+
+    try {
+      const error = await response.json()
+
+      message =
+        error.detail ||
+        error.message ||
+        message
+    } catch {
+      // mantém mensagem padrão
+    }
+
+    throw new Error(message)
   }
 
-  if (response.status === 204) return null
+  if (response.status === 204) {
+    return null
+  }
+
   return response.json()
 }
 
-export const backend = {
-  getOrders: () => request("/orders"),
-  createOrder: (data) => request("/orders", { method: "POST", body: JSON.stringify(data) }),
-  updateOrder: (id, data) => request(`/orders/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(data) }),
-  deleteOrder: (id) => request(`/orders/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  getProducts: () => request("/products"),
-  createProduct: (data) => request("/products", { method: "POST", body: JSON.stringify(data) }),
-  updateProduct: (id, data) => request(`/products/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(data) }),
-  deleteProduct: (id) => request(`/products/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  login: (credentials) => request("/auth/login", { method: "POST", body: JSON.stringify(credentials) }),
-  register: (data) => request("/auth/register", { method: "POST", body: JSON.stringify(data) }),
+export async function getOrders() {
+  const data = await request("/api/orders")
+
+  return data.map(fromBackendOrder)
+}
+
+export async function createOrder(order) {
+  const data = await request("/api/orders", {
+    method: "POST",
+    body: JSON.stringify(
+      toBackendOrder(order)
+    ),
+  })
+
+  return fromBackendOrder(data)
+}
+
+export async function updateOrder(order) {
+  const data = await request(
+    `/api/orders/${encodeURIComponent(order.id)}`,
+    {
+      method: "PUT",
+
+      body: JSON.stringify(
+        toBackendOrder(order)
+      ),
+    }
+  )
+
+  return fromBackendOrder(data)
+}
+
+export async function removeOrder(id) {
+  return request(
+    `/api/orders/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+    }
+  )
 }
