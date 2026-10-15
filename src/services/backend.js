@@ -212,3 +212,82 @@ export async function removeOrder(id) {
     }
   )
 }
+
+// ============================================================
+// PRODUTOS - CONSULTAR ESTOQUE
+// ============================================================
+
+export async function getProducts() {
+  const data = await request("/api/products")
+
+  if (!Array.isArray(data)) {
+    throw new Error(
+      "O backend retornou um formato inválido para os produtos."
+    )
+  }
+
+  return data.map((product) => ({
+    id: product.id,
+    name: product.name,
+    quantity: Number(product.quantity),
+    min: Number(product.min),
+    max: Number(product.max),
+    unitPrice: Number(product.unitPrice),
+    active: product.active,
+  }))
+}
+// ============================================================
+// PRODUTOS - CADASTRAR
+// ============================================================
+
+export async function createProduct(product) {
+  return request("/api/products", {
+    method: "POST",
+    body: JSON.stringify({
+      id: String(product.id),
+      name: product.name,
+      quantity: Number(product.quantity),
+      min: Number(product.min),
+      max: Number(product.max),
+      unitPrice: Number(product.unitPrice),
+      active: product.active !== false,
+    }),
+  })
+}
+
+// ============================================================
+// PRODUTOS - ATUALIZAR
+// ============================================================
+
+export async function updateProduct(product) {
+  return request(
+    `/api/products/${encodeURIComponent(product.id)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        id: String(product.id),
+        name: product.name,
+        quantity: Number(product.quantity),
+        min: Number(product.min),
+        max: Number(product.max),
+        unitPrice: Number(product.unitPrice),
+        active: product.active !== false,
+      }),
+    }
+  )
+}
+// ============================================================
+// PRODUTOS - MOVIMENTAÇÃO DE ESTOQUE
+// ============================================================
+
+export async function moveProductStock(productId, delta) {
+  return request(
+    `/api/products/${encodeURIComponent(productId)}/stock`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        delta: Number(delta),
+      }),
+    }
+  )
+}

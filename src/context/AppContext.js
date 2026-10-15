@@ -22,6 +22,10 @@ import {
   createOrder,
   updateOrder,
   removeOrder,
+  getProducts,
+  createProduct,
+  updateProduct,
+  moveProductStock,
 } from "@/services/backend"
 
 const STORAGE_KEY = "modusdestinatio_state_v1"
@@ -99,13 +103,24 @@ export function AppProvider({ children }) {
     async function initialize() {
 
       const saved = loadState()
+      // Carrega o estoque diretamente do FastAPI
+      try {
+        const backendProducts = await getProducts()
+
+        setInventory(backendProducts)
+
+        console.log(
+          "Produtos carregados do backend:",
+          backendProducts.length
+        )
+      } catch (error) {
+        console.error(
+          "Erro ao carregar produtos:",
+          error
+        )
+      }
 
       if (saved) {
-
-        setInventory(
-          saved.inventory ||
-          initialInventory
-        )
 
         setUsers(
           saved.users ||
@@ -310,7 +325,7 @@ export function AppProvider({ children }) {
           return current.map(
             (order) =>
               order.id ===
-              finalOrder.id
+                finalOrder.id
 
                 ? finalOrder
 
@@ -464,66 +479,90 @@ export function AppProvider({ children }) {
    * DELETE /api/products/{id}
    */
 
-  function saveProduct(data) {
-
+  async function saveProduct(data) {
     const product = {
-
       ...data,
 
       id:
         data.id ||
-        `P${Date.now()
-          .toString()
-          .slice(-6)}`,
+        `P${Date.now().toString().slice(-6)}`,
 
-      quantity:
-        Math.max(
-          0,
-          Number(data.quantity) || 0
-        ),
+      quantity: Math.max(
+        0,
+        Number(data.quantity) || 0
+      ),
 
-      max:
-        Math.max(
-          1,
-          Number(data.max) || 1
-        ),
+      max: Math.max(
+        1,
+        Number(data.max) || 1
+      ),
 
-      min:
-        Math.max(
-          0,
-          Number(data.min) || 0
-        ),
+      min: Math.max(
+        0,
+        Number(data.min) || 0
+      ),
 
-      unitPrice:
-        Math.max(
-          0,
-          Number(data.unitPrice) || 0
-        ),
+      unitPrice: Math.max(
+        0,
+        Number(data.unitPrice) || 0
+      ),
 
-      active:
-        data.active !== false,
+      active: data.active !== false,
     }
 
-    setInventory((current) =>
-      current.some(
-        (item) =>
-          item.id === product.id
-      )
-
-        ? current.map(
-            (item) =>
-              item.id === product.id
-                ? product
-                : item
-          )
-
-        : [
-            ...current,
-            product,
-          ]
+    const exists = inventory.some(
+      (item) => item.id === product.id
     )
 
-    return product
+    if (exists) {
+      try {
+        const updatedProduct = await updateProduct(product)
+
+        setInventory((current) =>
+          current.map((item) =>
+            item.id === updatedProduct.id
+              ? updatedProduct
+              : item
+          )
+        )
+
+        return updatedProduct
+      } catch (error) {
+        console.error(
+          "Erro ao atualizar produto:",
+          error
+        )
+
+        throw error
+      }
+    }
+
+    // Ainda não integramos a edição ao FastAPI.
+    // Impedimos que ela seja tratada como uma alteração salva.
+    if (exists) {
+      throw new Error(
+        "A edição de produtos ainda não está integrada ao backend."
+      )
+    }
+
+    try {
+      const savedProduct = await createProduct(product)
+
+      setInventory((current) => [
+        ...current,
+        savedProduct,
+      ])
+
+      return savedProduct
+
+    } catch (error) {
+      console.error(
+        "Erro ao cadastrar produto:",
+        error
+      )
+
+      throw error
+    }
   }
 
 
@@ -539,30 +578,39 @@ export function AppProvider({ children }) {
   }
 
 
-  function changeStock(
-    id,
-    delta
-  ) {
+  async function changeStock(id, delta) {
+    try {
+      const result = await moveProductStock(id, delta)
 
-    setInventory((current) =>
-      current.map(
-        (item) =>
+      const newQuantity = Number(result.newQuantity)
+
+      if (!Number.isFinite(newQuantity)) {
+        throw new Error(
+          "O backend retornou uma quantidade inválida."
+        )
+      }
+
+      setInventory((current) =>
+        current.map((item) =>
           item.id === id
-
             ? {
-                ...item,
-
-                quantity:
-                  Math.max(
-                    0,
-                    item.quantity +
-                      delta
-                  ),
-              }
-
+              ...item,
+              quantity: newQuantity,
+            }
             : item
+        )
       )
-    )
+
+      return result
+
+    } catch (error) {
+      console.error(
+        "Erro ao movimentar estoque:",
+        error
+      )
+
+      throw error
+    }
   }
 
 
@@ -728,9 +776,9 @@ export function AppProvider({ children }) {
           user.id === id
 
             ? {
-                ...user,
-                ...patch,
-              }
+              ...user,
+              ...patch,
+            }
 
             : user
       )
@@ -807,21 +855,21 @@ export function AppProvider({ children }) {
       )
 
         ? current.map(
-            (item) =>
-              item.id === user.id
+          (item) =>
+            item.id === user.id
 
-                ? {
-                    ...item,
-                    ...user,
-                  }
+              ? {
+                ...item,
+                ...user,
+              }
 
-                : item
-          )
+              : item
+        )
 
         : [
-            ...current,
-            user,
-          ]
+          ...current,
+          user,
+        ]
     )
 
     return user
@@ -907,10 +955,10 @@ export function AppProvider({ children }) {
           task.id === id
 
             ? {
-                ...task,
-                done:
-                  !task.done,
-              }
+              ...task,
+              done:
+                !task.done,
+            }
 
             : task
       )

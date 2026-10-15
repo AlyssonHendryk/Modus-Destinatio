@@ -70,6 +70,18 @@ class Order(BaseModel):
     items: Optional[List[OrderItem]] = []
 
 
+class Product(BaseModel):
+    id: str
+    name: str
+    quantity: int
+    min: int
+    max: int
+    unitPrice: float
+    active: bool = True
+
+class StockMovement(BaseModel):
+    delta: int
+
 # ============================================================
 # FUNÇÕES AUXILIARES
 # ============================================================
@@ -476,7 +488,313 @@ def delete_order(order_id: str):
             status_code=500,
             detail=str(error)
         )
+    # ============================================================
+# PATCH - MOVIMENTAÇÃO DE ESTOQUE
+# ============================================================
 
+@app.patch("/api/products/{product_id}/stock")
+def move_product_stock(product_id: str, movement: StockMovement):
+    try:
+        response = supabase.rpc(
+            "move_product_stock",
+            {
+                "p_product_id": product_id,
+                "p_delta": movement.delta
+            }
+        ).execute()
+
+        return {
+            "productId": product_id,
+            "delta": movement.delta,
+            "newQuantity": response.data,
+            "message": "Estoque atualizado com sucesso."
+        }
+
+    except Exception as error:
+        error_message = str(error)
+
+        if "Produto não encontrado" in error_message:
+            raise HTTPException(
+                status_code=404,
+                detail="Produto não encontrado."
+            )
+
+        if "Estoque insuficiente" in error_message:
+            raise HTTPException(
+                status_code=422,
+                detail="Estoque insuficiente ou quantidade inválida."
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail=error_message
+        )
+# ============================================================
+# GET - LISTAR PRODUTOS
+# ============================================================
+
+@app.get("/api/products")
+def get_products():
+    try:
+        response = (
+            supabase
+            .table("products")
+            .select("*")
+            .order("name")
+            .execute()
+        )
+
+        products = []
+
+        for product in response.data:
+            products.append({
+                "id": product["id"],
+                "name": product["name"],
+                "quantity": product["quantity"],
+                "min": product["min"],
+                "max": product["max"],
+                "unitPrice": float(product["unit_price"]),
+                "active": product["active"]
+            })
+
+        return products
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
+
+
+
+    # ============================================================
+# POST - CADASTRAR PRODUTO
+# ============================================================
+
+@app.post("/api/products", response_model=Product, status_code=201)
+def create_product(product: Product):
+    if (
+        not product.id.strip()
+        or not product.name.strip()
+        or product.quantity < 0
+        or product.min < 0
+        or product.max < 1
+        or product.min > product.max
+        or product.unitPrice < 0
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Dados do produto inválidos."
+        )
+
+    try:
+        response = (
+            supabase
+            .rpc(
+                "create_product_with_stock",
+                {
+                    "p_id": product.id,
+                    "p_name": product.name,
+                    "p_quantity": product.quantity,
+                    "p_min": product.min,
+                    "p_max": product.max,
+                    "p_unit_price": product.unitPrice,
+                    "p_active": product.active
+                }
+            )
+            .execute()
+        )
+
+        if not response.data:
+            raise HTTPException(
+                status_code=500,
+                detail="O cadastro não retornou o produto criado."
+            )
+
+        saved = response.data[0]
+
+        return {
+            "id": saved["id"],
+            "name": saved["name"],
+            "quantity": saved["quantity"],
+            "min": saved["min"],
+            "max": saved["max"],
+            "unitPrice": float(saved["unit_price"]),
+            "active": saved["active"]
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        # Produto com ID já cadastrado
+        if "23505" in str(error):
+            raise HTTPException(
+                status_code=409,
+                detail="Já existe um produto com este ID."
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Erro interno ao cadastrar produto."
+        )
+    # ============================================================
+# PUT - ATUALIZAR PRODUTO
+# ============================================================
+
+@app.put("/api/products/{product_id}", response_model=Product)
+def update_product(product_id: str, product: Product):
+    if product.id != product_id:
+        raise HTTPException(
+            status_code=400,
+            detail="O ID do produto não corresponde ao ID da URL."
+        )
+
+    if (
+        product.quantity < 0
+        or product.min < 0
+        or product.max < 1
+        or product.min > product.max
+        or product.unitPrice < 0
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Quantidade, limites ou preço inválidos."
+        )
+
+    try:
+        existing = (
+            supabase
+            .table("products")
+            .select("id")
+            .eq("id", product_id)
+            .execute()
+        )
+
+        if not existing.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Produto não encontrado."
+            )
+
+        # A quantidade não pode ser modificada por esta rota.
+        # Movimentações de estoque devem utilizar a função
+        # move_product_stock, que registra o histórico.
+        product_data = {
+            "name": product.name,
+            "min": product.min,
+            "max": product.max,
+            "unit_price": product.unitPrice,
+            "active": product.active
+        }
+
+        response = (
+            supabase
+            .table("products")
+            .update(product_data)
+            .eq("id", product_id)
+            .execute()
+        )
+
+        if not response.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Produto não encontrado após atualização."
+            )
+
+        saved = response.data[0]
+
+        return {
+            "id": saved["id"],
+            "name": saved["name"],
+            "quantity": saved["quantity"],
+            "min": saved["min"],
+            "max": saved["max"],
+            "unitPrice": float(saved["unit_price"]),
+            "active": saved["active"]
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Erro interno ao atualizar produto."
+        )
+
+  # ============================================================
+# DELETE - EXCLUIR PRODUTO
+# ============================================================
+
+@app.delete("/api/products/{product_id}")
+def delete_product(product_id: str):
+    try:
+        # Verifica se o produto existe
+        existing = (
+            supabase
+            .table("products")
+            .select("id")
+            .eq("id", product_id)
+            .execute()
+        )
+
+        if not existing.data:
+            raise HTTPException(
+                status_code=404,
+                detail="Produto não encontrado."
+            )
+
+        # Verifica se o produto está vinculado a pedidos
+        linked_orders = (
+            supabase
+            .table("order_items")
+            .select("product_id")
+            .eq("product_id", product_id)
+            .limit(1)
+            .execute()
+        )
+
+        if linked_orders.data:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Não é possível excluir este produto, "
+                    "pois ele possui pedidos vinculados."
+                )
+            )
+
+        # Solicita a exclusão
+        supabase.table("products") \
+            .delete() \
+            .eq("id", product_id) \
+            .execute()
+
+        return {
+            "message": f"Produto {product_id} excluído com sucesso."
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        # A chave estrangeira também protege contra
+        # vínculos criados entre a consulta e a exclusão.
+        error_message = str(error)
+
+        if "23503" in error_message:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Não é possível excluir este produto, "
+                    "pois existem registros vinculados."
+                )
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Erro interno ao excluir produto."
+        )
 
 # ============================================================
 # TESTE DA API
