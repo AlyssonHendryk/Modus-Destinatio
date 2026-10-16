@@ -291,3 +291,23 @@ export async function moveProductStock(productId, delta) {
     }
   )
 }
+// ============================================================
+// PRODUTOS - EXCLUSÃO
+// ============================================================
+
+export async function removeProduct(productId) {
+  return request(
+    `/api/products/${encodeURIComponent(productId)}`,
+    {
+      method: "DELETE",
+    }
+  )
+}
+
+// ============================================================
+// ESTOQUE - HISTÓRICO DE MOVIMENTAÇÕES
+// ============================================================
+
+export async function getStockMovements() {
+  return request("/api/stock-movements")
+}

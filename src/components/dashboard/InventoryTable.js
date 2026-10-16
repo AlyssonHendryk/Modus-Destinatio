@@ -95,6 +95,26 @@ export default function InventoryTable({ compact = false, search = "" }) {
       setMovingProductId(null)
     }
   }
+  async function handleDeleteProduct(item) {
+    const confirmed = window.confirm(
+      `Deseja realmente excluir o produto "${item.name}"?`
+    )
+
+    if (!confirmed) return
+
+    try {
+      await deleteProduct(item.id)
+
+      alert("Produto excluído com sucesso.")
+    } catch (error) {
+      console.error("Erro ao excluir produto:", error)
+
+      alert(
+        error.message ||
+        "Não foi possível excluir o produto."
+      )
+    }
+  }
   return (
     <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
       <div className="flex items-center justify-between mb-6">
@@ -255,16 +275,12 @@ export default function InventoryTable({ compact = false, search = "" }) {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      if (window.confirm(`Excluir ${item.name}?`)) {
-                        deleteProduct(item.id)
-                      }
-                    }}
+                    onClick={() => handleDeleteProduct(item)}
                     className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
                     title="Excluir produto"
                   >
                     <Trash2 className="w-4 h-4" />
-                  </button>
+                  </button>s
                 </>
               )}
             </div>

@@ -26,6 +26,8 @@ import {
   createProduct,
   updateProduct,
   moveProductStock,
+  removeProduct,
+  getStockMovements,
 } from "@/services/backend"
 
 const STORAGE_KEY = "modusdestinatio_state_v1"
@@ -84,7 +86,23 @@ export function AppProvider({ children }) {
     backendError,
     setBackendError,
   ] = useState(null)
+  const [stockMovements, setStockMovements] = useState([])
+  async function loadStockMovements() {
+  try {
+    const movements = await getStockMovements()
 
+    setStockMovements(movements)
+
+    return movements
+  } catch (error) {
+    console.error(
+      "Erro ao carregar histórico de movimentações:",
+      error
+    )
+
+    throw error
+  }
+}
 
   /*
    * ========================================
@@ -113,9 +131,26 @@ export function AppProvider({ children }) {
           "Produtos carregados do backend:",
           backendProducts.length
         )
-      } catch (error) {
+            } catch (error) {
         console.error(
           "Erro ao carregar produtos:",
+          error
+        )
+      }
+
+      // ==========================================
+      // HISTÓRICO DE MOVIMENTAÇÕES DE ESTOQUE
+      // ==========================================
+
+      try {
+        await loadStockMovements()
+
+        console.log(
+          "Histórico de movimentações carregado."
+        )
+      } catch (error) {
+        console.error(
+          "Erro ao inicializar histórico:",
           error
         )
       }
@@ -566,52 +601,74 @@ export function AppProvider({ children }) {
   }
 
 
-  function deleteProduct(id) {
-
-    setInventory(
-      (current) =>
-        current.filter(
-          (item) =>
-            item.id !== id
-        )
-    )
-  }
-
-
-  async function changeStock(id, delta) {
+  async function deleteProduct(id) {
     try {
-      const result = await moveProductStock(id, delta)
-
-      const newQuantity = Number(result.newQuantity)
-
-      if (!Number.isFinite(newQuantity)) {
-        throw new Error(
-          "O backend retornou uma quantidade inválida."
-        )
-      }
+      await removeProduct(id)
 
       setInventory((current) =>
-        current.map((item) =>
-          item.id === id
-            ? {
-              ...item,
-              quantity: newQuantity,
-            }
-            : item
-        )
+        current.filter((item) => item.id !== id)
       )
 
-      return result
+      return true
 
     } catch (error) {
       console.error(
-        "Erro ao movimentar estoque:",
+        "Erro ao excluir produto:",
         error
       )
 
       throw error
     }
   }
+
+
+
+async function changeStock(id, delta) {
+  try {
+    // 1. Envia a movimentação ao FastAPI
+    const result = await moveProductStock(id, delta)
+
+    const newQuantity = Number(result.newQuantity)
+
+    if (!Number.isFinite(newQuantity)) {
+      throw new Error(
+        "O backend retornou uma quantidade inválida."
+      )
+    }
+
+    // 2. Atualiza a quantidade do produto na interface
+    setInventory((current) =>
+      current.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              quantity: newQuantity,
+            }
+          : item
+      )
+    )
+
+    // 3. Atualiza o histórico de movimentações
+    try {
+      await loadStockMovements()
+    } catch (historyError) {
+      console.error(
+        "Estoque atualizado, mas não foi possível atualizar o histórico:",
+        historyError
+      )
+    }
+
+    return result
+  } catch (error) {
+    console.error(
+      "Erro ao movimentar estoque:",
+      error
+    )
+
+    throw error
+  }
+}
+
 
 
   /*
@@ -1011,6 +1068,10 @@ export function AppProvider({ children }) {
     saveProduct,
 
     deleteProduct,
+
+    stockMovements,
+
+    loadStockMovements,
 
     changeStock,
 

@@ -53,11 +53,13 @@ app.add_middleware(
 # SCHEMAS
 # ============================================================
 
+from pydantic import BaseModel, Field
+
 class OrderItem(BaseModel):
     productId: str
     product: str
-    quantity: int
-    unitPrice: float
+    quantity: int = Field(gt=0)
+    unitPrice: float = Field(ge=0)
 
 
 class Order(BaseModel):
@@ -67,7 +69,7 @@ class Order(BaseModel):
     status: str
     date: str
     total: float
-    items: Optional[List[OrderItem]] = []
+    items: List[OrderItem] = Field(default_factory=list)
 
 
 class Product(BaseModel):
@@ -174,120 +176,85 @@ def get_orders():
     "/api/orders",
     response_model=Order
 )
+
 def create_order(order: Order):
-
     try:
+        # Prepara os itens no formato esperado pela função SQL
+        items_data = [
+            {
+                "productId": item.productId,
+                "product": item.product,
+                "quantity": item.quantity,
+                "unitPrice": item.unitPrice,
+            }
+            for item in (order.items or [])
+        ]
 
-        existing = (
-            supabase
-            .table("orders")
-            .select("id")
-            .eq("id", order.id)
-            .execute()
-        )
+        # Cria o pedido e movimenta o estoque em uma transação
+        supabase.rpc(
+            "create_order_with_stock",
+            {
+                "p_order_id": order.id,
+                "p_supplier": order.supplier,
+                "p_operation": order.operation,
+                "p_status": order.status,
+                "p_order_date": order.date,
+                "p_total": order.total,
+                "p_items": items_data,
+            },
+        ).execute()
 
-        if existing.data:
-
-            raise HTTPException(
-                status_code=400,
-                detail="ID de pedido já existe."
-            )
-
-
-        order_data = {
-
-            "id":
-                order.id,
-
-            "supplier":
-                order.supplier,
-
-            "operation":
-                order.operation,
-
-            "status":
-                order.status,
-
-            "order_date":
-                order.date,
-
-            "total":
-                order.total,
-        }
-
-
-        (
-            supabase
-            .table("orders")
-            .insert(order_data)
-            .execute()
-        )
-
-
-        if order.items:
-
-            items_data = []
-
-            for item in order.items:
-
-                items_data.append(
-                    {
-                        "order_id":
-                            order.id,
-
-                        "product_id":
-                            item.productId,
-
-                        "product":
-                            item.product,
-
-                        "quantity":
-                            item.quantity,
-
-                        "unit_price":
-                            item.unitPrice,
-                    }
-                )
-
-
-            (
-                supabase
-                .table("order_items")
-                .insert(items_data)
-                .execute()
-            )
-
-
-        created_order = (
-            get_order_from_database(
-                order.id
-            )
-        )
-
+        # Recupera o pedido recém-criado
+        created_order = get_order_from_database(order.id)
 
         if not created_order:
-
             raise HTTPException(
                 status_code=500,
-                detail="Pedido criado, mas não foi possível recuperá-lo."
+                detail=(
+                    "Pedido criado, mas não foi possível "
+                    "recuperá-lo."
+                ),
             )
-
 
         return created_order
 
-
     except HTTPException:
-
         raise
 
-
     except Exception as error:
+        error_message = str(error)
+
+        print(
+            "Erro ao criar pedido e movimentar estoque:",
+            error_message,
+        )
+
+        if (
+            "Estoque insuficiente" in error_message
+            or "Produto não encontrado" in error_message
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Estoque insuficiente ou produto não encontrado.",
+            )
+
+        if (
+            "ID de pedido já existe" in error_message
+            or "Operação inválida" in error_message
+            or "quantidade inválida" in error_message.lower()
+            or "Lista de itens inválida" in error_message
+            or "pelo menos um item" in error_message
+            or "pedido cancelado" in error_message
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=error_message,
+            )
 
         raise HTTPException(
             status_code=500,
-            detail=str(error)
+            detail="Erro interno ao criar o pedido.",
         )
-
 
 # ============================================================
 # PUT - ATUALIZAR PEDIDO
@@ -528,6 +495,29 @@ def move_product_stock(product_id: str, movement: StockMovement):
         raise HTTPException(
             status_code=500,
             detail=error_message
+        )
+    # ============================================================
+# GET - HISTÓRICO DE MOVIMENTAÇÕES DE ESTOQUE
+# ============================================================
+
+@app.get("/api/stock-movements")
+def get_stock_movements():
+    try:
+        response = (
+            supabase
+            .table("stock_movements")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(100)
+            .execute()
+        )
+
+        return response.data
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
         )
 # ============================================================
 # GET - LISTAR PRODUTOS
