@@ -88,21 +88,21 @@ export function AppProvider({ children }) {
   ] = useState(null)
   const [stockMovements, setStockMovements] = useState([])
   async function loadStockMovements() {
-  try {
-    const movements = await getStockMovements()
+    try {
+      const movements = await getStockMovements()
 
-    setStockMovements(movements)
+      setStockMovements(movements)
 
-    return movements
-  } catch (error) {
-    console.error(
-      "Erro ao carregar histórico de movimentações:",
-      error
-    )
+      return movements
+    } catch (error) {
+      console.error(
+        "Erro ao carregar histórico de movimentações:",
+        error
+      )
 
-    throw error
+      throw error
+    }
   }
-}
 
   /*
    * ========================================
@@ -131,7 +131,7 @@ export function AppProvider({ children }) {
           "Produtos carregados do backend:",
           backendProducts.length
         )
-            } catch (error) {
+      } catch (error) {
         console.error(
           "Erro ao carregar produtos:",
           error
@@ -312,87 +312,73 @@ export function AppProvider({ children }) {
    * PUT /api/orders/{id}
    */
 
+
   async function saveOrder(data) {
+    const normalized = normalizeOrder(data)
 
-    const normalized =
-      normalizeOrder(data)
-
-    const exists =
-      orders.some(
-        (order) =>
-          order.id === normalized.id
-      )
+    const exists = orders.some(
+      (order) => order.id === normalized.id
+    )
 
     try {
-
       let savedOrder
 
+      // 1. Cria ou atualiza o pedido no FastAPI
       if (exists) {
-
-        savedOrder =
-          await updateOrder(
-            normalized
-          )
-
+        savedOrder = await updateOrder(normalized)
       } else {
-
-        savedOrder =
-          await createOrder(
-            normalized
-          )
-
+        savedOrder = await createOrder(normalized)
       }
 
-      const finalOrder =
-        normalizeOrder(savedOrder)
+      const finalOrder = normalizeOrder(savedOrder)
 
+      // 2. Atualiza a lista de pedidos
       setOrders((current) => {
-
-        const alreadyExists =
-          current.some(
-            (order) =>
-              order.id ===
-              finalOrder.id
-          )
+        const alreadyExists = current.some(
+          (order) => order.id === finalOrder.id
+        )
 
         if (alreadyExists) {
-
-          return current.map(
-            (order) =>
-              order.id ===
-                finalOrder.id
-
-                ? finalOrder
-
-                : order
+          return current.map((order) =>
+            order.id === finalOrder.id
+              ? finalOrder
+              : order
           )
         }
 
-        return [
-          finalOrder,
-          ...current,
-        ]
+        return [finalOrder, ...current]
       })
 
       setBackendError(null)
 
+      // 3. Recarrega os produtos e o histórico após salvar
+      try {
+
+        const updatedProducts = await getProducts()
+
+        setInventory(updatedProducts)
+
+        await loadStockMovements()
+
+      } catch (refreshError) {
+        console.error(
+          "Pedido salvo, mas não foi possível atualizar o estoque ou o histórico:",
+          refreshError
+        )
+      }
+
       return finalOrder
-
     } catch (error) {
-
       console.error(
         "Erro ao salvar pedido:",
         error
       )
 
-      setBackendError(
-        error.message
-      )
+      setBackendError(error.message)
 
       throw error
     }
   }
-
 
   /*
    * DELETE /api/orders/{id}
@@ -623,51 +609,51 @@ export function AppProvider({ children }) {
 
 
 
-async function changeStock(id, delta) {
-  try {
-    // 1. Envia a movimentação ao FastAPI
-    const result = await moveProductStock(id, delta)
+  async function changeStock(id, delta) {
+    try {
+      // 1. Envia a movimentação ao FastAPI
+      const result = await moveProductStock(id, delta)
 
-    const newQuantity = Number(result.newQuantity)
+      const newQuantity = Number(result.newQuantity)
 
-    if (!Number.isFinite(newQuantity)) {
-      throw new Error(
-        "O backend retornou uma quantidade inválida."
-      )
-    }
+      if (!Number.isFinite(newQuantity)) {
+        throw new Error(
+          "O backend retornou uma quantidade inválida."
+        )
+      }
 
-    // 2. Atualiza a quantidade do produto na interface
-    setInventory((current) =>
-      current.map((item) =>
-        item.id === id
-          ? {
+      // 2. Atualiza a quantidade do produto na interface
+      setInventory((current) =>
+        current.map((item) =>
+          item.id === id
+            ? {
               ...item,
               quantity: newQuantity,
             }
-          : item
+            : item
+        )
       )
-    )
 
-    // 3. Atualiza o histórico de movimentações
-    try {
-      await loadStockMovements()
-    } catch (historyError) {
+      // 3. Atualiza o histórico de movimentações
+      try {
+        await loadStockMovements()
+      } catch (historyError) {
+        console.error(
+          "Estoque atualizado, mas não foi possível atualizar o histórico:",
+          historyError
+        )
+      }
+
+      return result
+    } catch (error) {
       console.error(
-        "Estoque atualizado, mas não foi possível atualizar o histórico:",
-        historyError
+        "Erro ao movimentar estoque:",
+        error
       )
+
+      throw error
     }
-
-    return result
-  } catch (error) {
-    console.error(
-      "Erro ao movimentar estoque:",
-      error
-    )
-
-    throw error
   }
-}
 
 
 

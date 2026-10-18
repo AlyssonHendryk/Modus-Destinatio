@@ -170,6 +170,7 @@ export default function Dashboard({ initialTab = "dashboard" }) {
               PEDIDOS
           ================================================== */}
 
+
           {activeTab === "pedidos" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full">
               <OrdersHeader onNewOrderClick={openCreate} />
@@ -179,10 +180,10 @@ export default function Dashboard({ initialTab = "dashboard" }) {
               <OrdersTable
                 orders={filteredOrders}
                 onEditClick={openEdit}
-                onDeleteClick={handleDeleteOrder}
               />
             </div>
           )}
+
 
           {/* ==================================================
               ESTOQUE

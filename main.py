@@ -264,139 +264,101 @@ def create_order(order: Order):
     "/api/orders/{order_id}",
     response_model=Order
 )
-def update_order(
-    order_id: str,
-    updated_order: Order
-):
 
+def update_order(order_id: str, updated_order: Order):
     try:
-
-        existing = (
-            supabase
-            .table("orders")
-            .select("id")
-            .eq("id", order_id)
-            .execute()
-        )
-
-
-        if not existing.data:
-
+        # Garante que o ID do pedido não seja alterado
+        if updated_order.id != order_id:
             raise HTTPException(
-                status_code=404,
-                detail="Pedido não encontrado."
+                status_code=400,
+                detail="O ID do pedido não corresponde ao ID da URL."
             )
 
+        # Prepara os itens para a função PostgreSQL
+        items_data = [
+            {
+                "productId": item.productId,
+                "product": item.product,
+                "quantity": item.quantity,
+                "unitPrice": item.unitPrice,
+            }
+            for item in (updated_order.items or [])
+        ]
 
-        order_data = {
+        # Atualiza o pedido e ajusta o estoque
+        # em uma única transação PostgreSQL
+        supabase.rpc(
+            "update_order_with_stock",
+            {
+                "p_order_id": order_id,
+                "p_supplier": updated_order.supplier,
+                "p_operation": updated_order.operation,
+                "p_status": updated_order.status,
+                "p_order_date": updated_order.date,
+                "p_total": updated_order.total,
+                "p_items": items_data,
+            },
+        ).execute()
 
-            "supplier":
-                updated_order.supplier,
-
-            "operation":
-                updated_order.operation,
-
-            "status":
-                updated_order.status,
-
-            "order_date":
-                updated_order.date,
-
-            "total":
-                updated_order.total,
-        }
-
-
-        (
-            supabase
-            .table("orders")
-            .update(order_data)
-            .eq(
-                "id",
-                order_id
-            )
-            .execute()
-        )
-
-
-        # Remove os itens antigos
-        (
-            supabase
-            .table("order_items")
-            .delete()
-            .eq(
-                "order_id",
-                order_id
-            )
-            .execute()
-        )
-
-
-        # Insere os novos itens
-        if updated_order.items:
-
-            items_data = []
-
-            for item in updated_order.items:
-
-                items_data.append(
-                    {
-                        "order_id":
-                            order_id,
-
-                        "product_id":
-                            item.productId,
-
-                        "product":
-                            item.product,
-
-                        "quantity":
-                            item.quantity,
-
-                        "unit_price":
-                            item.unitPrice,
-                    }
-                )
-
-
-            (
-                supabase
-                .table("order_items")
-                .insert(items_data)
-                .execute()
-            )
-
-
-        result = (
-            get_order_from_database(
-                order_id
-            )
-        )
-
+        # Recupera o pedido atualizado
+        result = get_order_from_database(order_id)
 
         if not result:
-
             raise HTTPException(
-                status_code=404,
-                detail="Pedido não encontrado."
+                status_code=500,
+                detail=(
+                    "Pedido atualizado, mas não foi possível "
+                    "recuperá-lo."
+                ),
             )
-
 
         return result
 
-
     except HTTPException:
-
         raise
 
-
     except Exception as error:
+        error_message = str(error)
+
+        print(
+            "Erro ao atualizar pedido:",
+            error_message,
+        )
+
+        if "Pedido não encontrado" in error_message:
+            raise HTTPException(
+                status_code=404,
+                detail="Pedido não encontrado.",
+            )
+
+        if (
+            "Estoque insuficiente" in error_message
+            or "Produto não encontrado" in error_message
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Estoque insuficiente ou produto não encontrado.",
+            )
+
+        if (
+            "Pedido cancelado" in error_message
+            or "Pedido sem movimentação" in error_message
+            or "Operação inválida" in error_message
+            or "Status inválido" in error_message
+            or "itens válidos" in error_message
+            or "Item do pedido inválido" in error_message
+            or "Operação original inválida" in error_message
+            or "Ajuste de estoque fora do limite" in error_message
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=error_message,
+            )
 
         raise HTTPException(
             status_code=500,
-            detail=str(error)
+            detail="Erro interno ao atualizar o pedido.",
         )
-
 
 # ============================================================
 # DELETE - EXCLUIR PEDIDO

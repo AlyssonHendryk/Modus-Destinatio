@@ -1,21 +1,339 @@
-"use client"
-import { useEffect, useState, Fragment } from "react"
-import { ChevronDown, ChevronUp, Edit2, Trash2, CheckCircle, XCircle, Clock, Truck, PackageSearch, ChevronLeft, ChevronRight } from "lucide-react"
-import { formatCurrency, ORDER_STATUS } from "@/utils/formatters"
 
-export function OrdersTable({ orders = [], onEditClick, onDeleteClick }) {
+"use client"
+
+import { useEffect, useState, Fragment } from "react"
+
+import {
+  ChevronDown,
+  ChevronUp,
+  Edit2,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Truck,
+  PackageSearch,
+  ChevronLeft,
+  ChevronRight
+} from "lucide-react"
+
+import {
+  formatCurrency,
+  ORDER_STATUS
+} from "@/utils/formatters"
+
+export function OrdersTable({
+  orders = [],
+  onEditClick
+}) {
   const [expandedOrder, setExpandedOrder] = useState(null)
   const [currentPage, setCurrentPage] = useState(1)
+
   const pageSize = 8
-  const totalPages = Math.max(1, Math.ceil(orders.length / pageSize))
-  useEffect(() => { if (currentPage > totalPages) setCurrentPage(totalPages) }, [currentPage, totalPages])
-  const pageOrders = orders.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(orders.length / pageSize)
+  )
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
+
+  const pageOrders = orders.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  )
+
   const config = (status) => ({
-    completed: ["bg-green-50","text-green-700","border-green-200",CheckCircle], shipped: ["bg-orange-50","text-orange-700","border-orange-200",Truck], cancelled: ["bg-red-50","text-red-700","border-red-200",XCircle], waiting: ["bg-purple-50","text-purple-700","border-purple-200",Clock], separating: ["bg-amber-50","text-amber-700","border-amber-200",PackageSearch]
-  }[status] || ["bg-gray-50","text-gray-700","border-gray-200",Clock])
-  return <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"><div className="overflow-x-auto"><table className="w-full"><thead><tr className="border-b bg-gray-50/50">{["Id. Pedido","Cliente / Origem","Operação","Status","Data","Valor Total","Ações"].map(h=><th key={h} className="text-left py-4 px-6 text-xs font-semibold text-gray-600 uppercase">{h}</th>)}</tr></thead><tbody>
-    {pageOrders.length === 0 && <tr><td colSpan={7} className="p-10 text-center text-gray-500">Nenhum pedido encontrado.</td></tr>}
-    {pageOrders.map(order => { const [bg,text,border,Icon]=config(order.status); const expanded=expandedOrder===order.id; return <Fragment key={order.id}><tr onClick={()=>order.items?.length&&setExpandedOrder(expanded?null:order.id)} className="border-b hover:bg-gray-50 cursor-pointer"><td className="py-4 px-6 font-medium text-gray-900"><div className="flex gap-2 items-center">{order.id}{order.items?.length ? expanded?<ChevronUp size={16}/>:<ChevronDown size={16}/>:null}</div></td><td className="py-4 px-6 text-gray-900"><div>{order.customer}</div><div className="text-xs text-gray-500">{order.supplier}</div></td><td className="py-4 px-6 text-gray-600">{order.operation}</td><td className="py-4 px-6"><span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border ${bg} ${text} ${border}`}><Icon className="w-3.5 h-3.5" />{ORDER_STATUS[order.status] || order.status}</span></td><td className="py-4 px-6 text-gray-600 text-sm">{order.date}</td><td className="py-4 px-6 font-medium text-gray-900">{formatCurrency(order.total)}</td><td className="py-4 px-6"><div className="flex gap-2"><button type="button" onClick={e=>{e.stopPropagation();onEditClick?.(order)}} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4" /></button><button type="button" onClick={e=>{e.stopPropagation();onDeleteClick?.(order.id)}} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button></div></td></tr>
-    {expanded && <tr><td colSpan={7} className="bg-gray-50 p-5"><div className="bg-white border rounded-xl overflow-hidden"><table className="w-full"><thead><tr className="border-b">{["ID Produto","Produto","Quantidade","Preço unitário","Subtotal"].map(h=><th key={h} className="text-left p-3 text-xs text-gray-600 uppercase">{h}</th>)}</tr></thead><tbody>{order.items.map((item,i)=><tr key={`${item.productId}-${i}`} className="border-b last:border-0"><td className="p-3 text-sm">{item.productId}</td><td className="p-3">{item.product}</td><td className="p-3">{item.quantity}</td><td className="p-3">{formatCurrency(item.unitPrice)}</td><td className="p-3 font-medium">{formatCurrency(item.unitPrice*item.quantity)}</td></tr>)}</tbody></table></div></td></tr>}</Fragment> })}
-  </tbody></table></div><div className="border-t px-6 py-4 bg-gray-50/30 flex items-center justify-between"><p className="text-sm text-gray-600">Página {currentPage} de {totalPages} • {orders.length} registro(s)</p><div className="flex gap-2"><button type="button" disabled={currentPage===1} onClick={()=>setCurrentPage(p=>Math.max(1,p-1))} className="p-2 border rounded-lg disabled:opacity-40"><ChevronLeft className="w-4 h-4" /></button><button type="button" disabled={currentPage===totalPages} onClick={()=>setCurrentPage(p=>Math.min(totalPages,p+1))} className="p-2 border rounded-lg disabled:opacity-40"><ChevronRight className="w-4 h-4" /></button></div></div></div>
+    completed: [
+      "bg-green-50",
+      "text-green-700",
+      "border-green-200",
+      CheckCircle
+    ],
+    shipped: [
+      "bg-orange-50",
+      "text-orange-700",
+      "border-orange-200",
+      Truck
+    ],
+    cancelled: [
+      "bg-red-50",
+      "text-red-700",
+      "border-red-200",
+      XCircle
+    ],
+    waiting: [
+      "bg-purple-50",
+      "text-purple-700",
+      "border-purple-200",
+      Clock
+    ],
+    separating: [
+      "bg-amber-50",
+      "text-amber-700",
+      "border-amber-200",
+      PackageSearch
+    ]
+  }[status] || [
+    "bg-gray-50",
+    "text-gray-700",
+    "border-gray-200",
+    Clock
+  ])
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+
+      <div className="overflow-x-auto">
+        <table className="w-full">
+
+          <thead>
+            <tr className="border-b bg-gray-50/50">
+              {[
+                "Id. Pedido",
+                "Cliente / Origem",
+                "Operação",
+                "Status",
+                "Data",
+                "Valor Total",
+                "Ações"
+              ].map((heading) => (
+                <th
+                  key={heading}
+                  className="text-left py-4 px-6 text-xs font-semibold text-gray-600 uppercase"
+                >
+                  {heading}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {pageOrders.length === 0 && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="p-10 text-center text-gray-500"
+                >
+                  Nenhum pedido encontrado.
+                </td>
+              </tr>
+            )}
+
+            {pageOrders.map((order) => {
+              const [bg, text, border, Icon] = config(order.status)
+
+              const expanded = expandedOrder === order.id
+
+              const isCancelled = order.status === "cancelled"
+
+              return (
+                <Fragment key={order.id}>
+
+                  <tr
+                    onClick={() => {
+                      if (order.items?.length) {
+                        setExpandedOrder(
+                          expanded ? null : order.id
+                        )
+                      }
+                    }}
+                    className="border-b hover:bg-gray-50 cursor-pointer"
+                  >
+
+                    <td className="py-4 px-6 font-medium text-gray-900">
+                      <div className="flex gap-2 items-center">
+                        {order.id}
+
+                        {order.items?.length
+                          ? expanded
+                            ? <ChevronUp size={16} />
+                            : <ChevronDown size={16} />
+                          : null}
+                      </div>
+                    </td>
+
+                    <td className="py-4 px-6 text-gray-900">
+                      <div>{order.customer}</div>
+
+                      <div className="text-xs text-gray-500">
+                        {order.supplier}
+                      </div>
+                    </td>
+
+                    <td className="py-4 px-6 text-gray-600">
+                      {order.operation}
+                    </td>
+
+                    <td className="py-4 px-6">
+                      <span
+                        className={
+                          `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border ${bg} ${text} ${border}`
+                        }
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+
+                        {ORDER_STATUS[order.status] || order.status}
+                      </span>
+                    </td>
+
+                    <td className="py-4 px-6 text-gray-600 text-sm">
+                      {order.date}
+                    </td>
+
+                    <td className="py-4 px-6 font-medium text-gray-900">
+                      {formatCurrency(order.total)}
+                    </td>
+
+                    <td className="py-4 px-6">
+                      <div className="flex gap-2">
+
+                        {!isCancelled && (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onEditClick?.(order)
+                            }}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                            title="Editar pedido"
+                            aria-label={`Editar pedido ${order.id}`}
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        )}
+
+                        {isCancelled && (
+                          <span
+                            className="text-xs text-gray-400 italic"
+                            title="Pedidos cancelados não podem ser editados"
+                          >
+                            Cancelado
+                          </span>
+                        )}
+
+                      </div>
+                    </td>
+
+                  </tr>
+
+                  {expanded && (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="bg-gray-50 p-5"
+                      >
+                        <div className="bg-white border rounded-xl overflow-hidden">
+                          <table className="w-full">
+
+                            <thead>
+                              <tr className="border-b">
+                                {[
+                                  "ID Produto",
+                                  "Produto",
+                                  "Quantidade",
+                                  "Preço unitário",
+                                  "Subtotal"
+                                ].map((heading) => (
+                                  <th
+                                    key={heading}
+                                    className="text-left p-3 text-xs text-gray-600 uppercase"
+                                  >
+                                    {heading}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+
+                            <tbody>
+                              {order.items.map((item, index) => (
+                                <tr
+                                  key={`${item.productId}-${index}`}
+                                  className="border-b last:border-0"
+                                >
+                                  <td className="p-3 text-sm">
+                                    {item.productId}
+                                  </td>
+
+                                  <td className="p-3">
+                                    {item.product}
+                                  </td>
+
+                                  <td className="p-3">
+                                    {item.quantity}
+                                  </td>
+
+                                  <td className="p-3">
+                                    {formatCurrency(item.unitPrice)}
+                                  </td>
+
+                                  <td className="p-3 font-medium">
+                                    {formatCurrency(
+                                      item.unitPrice * item.quantity
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+
+                </Fragment>
+              )
+            })}
+          </tbody>
+
+        </table>
+      </div>
+
+      <div className="border-t px-6 py-4 bg-gray-50/30 flex items-center justify-between">
+
+        <p className="text-sm text-gray-600">
+          Página {currentPage} de {totalPages}
+          {" • "}
+          {orders.length} registro(s)
+        </p>
+
+        <div className="flex gap-2">
+
+          <button
+            type="button"
+            disabled={currentPage === 1}
+            onClick={() => {
+              setCurrentPage((page) =>
+                Math.max(1, page - 1)
+              )
+            }}
+            className="p-2 border rounded-lg disabled:opacity-40"
+            aria-label="Página anterior"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            disabled={currentPage === totalPages}
+            onClick={() => {
+              setCurrentPage((page) =>
+                Math.min(totalPages, page + 1)
+              )
+            }}
+            className="p-2 border rounded-lg disabled:opacity-40"
+            aria-label="Próxima página"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+
+        </div>
+      </div>
+
+    </div>
+  )
 }
