@@ -1,7 +1,8 @@
 
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useApp } from "@/context/AppContext"
 
 // Componentes do Dashboard
@@ -26,7 +27,11 @@ import OrderSeparationStats from "./separation/OrderSeparationStats"
 import OrderSeparationGrid from "./separation/OrderSeparationGrid"
 
 export default function Dashboard({ initialTab = "dashboard" }) {
+  const router = useRouter()
+
   const {
+    authLoading,
+    currentUser,
     orders,
     inventory,
     saveOrder,
@@ -39,6 +44,18 @@ export default function Dashboard({ initialTab = "dashboard" }) {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingOrder, setEditingOrder] = useState(null)
   const [separationFilter, setSeparationFilter] = useState("all")
+
+  // ============================================================
+  // VERIFICAÇÃO DE AUTENTICAÇÃO
+  // ============================================================
+
+  useEffect(() => {
+    if (authLoading) return
+
+    if (!currentUser) {
+      router.replace("/login")
+    }
+  }, [authLoading, currentUser, router])
 
   // ============================================================
   // FILTRAGEM DE PEDIDOS
@@ -106,7 +123,25 @@ export default function Dashboard({ initialTab = "dashboard" }) {
   }
 
   // ============================================================
-  // RENDERIZAÇÃO
+  // BLOQUEIO DE ACESSO SEM AUTENTICAÇÃO
+  // ============================================================
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <p className="text-gray-500">
+          Verificando sessão...
+        </p>
+      </div>
+    )
+  }
+
+  if (!currentUser) {
+    return null
+  }
+
+  // ============================================================
+  // RENDERIZAÇÃO DO DASHBOARD
   // ============================================================
 
   return (
@@ -170,7 +205,6 @@ export default function Dashboard({ initialTab = "dashboard" }) {
               PEDIDOS
           ================================================== */}
 
-
           {activeTab === "pedidos" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full">
               <OrdersHeader onNewOrderClick={openCreate} />
@@ -183,7 +217,6 @@ export default function Dashboard({ initialTab = "dashboard" }) {
               />
             </div>
           )}
-
 
           {/* ==================================================
               ESTOQUE
@@ -201,10 +234,8 @@ export default function Dashboard({ initialTab = "dashboard" }) {
                 </p>
               </div>
 
-              {/* Tabela de produtos */}
               <InventoryTable search={search} />
 
-              {/* Histórico de movimentações */}
               <StockMovementHistory />
             </div>
           )}

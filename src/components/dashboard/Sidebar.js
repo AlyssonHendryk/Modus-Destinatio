@@ -17,10 +17,15 @@ export default function Sidebar({ activeTab, onTabChange }) {
   const displayName = currentUser?.name || "Visitante"
   const displayRole = currentUser?.role || "Sessão local"
 
-  function handleLogout() {
-    logout()
-    router.push("/login")
+async function handleLogout() {
+  try {
+    await logout()
+    router.replace("/login")
+  } catch (error) {
+    console.error("Erro ao sair:", error)
+    alert("Não foi possível encerrar a sessão. Tente novamente.")
   }
+}
 
   return (
     <aside className="w-72 bg-[#111c5a] text-white flex flex-col shadow-xl">

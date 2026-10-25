@@ -1,10 +1,149 @@
+
 "use client"
+
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useApp } from "@/context/AppContext"
 
-export default function LoginCard(){
-  const [role,setRole]=useState("admin");const[email,setEmail]=useState("bruno@modusdestinatio.com");const[password,setPassword]=useState("123456");const[error,setError]=useState("");const router=useRouter();const{login}=useApp()
-  function submit(e){e.preventDefault();setError("");if(!email.trim()||!password)return setError("Preencha e-mail e senha.");const result=login(email,password,role);if(!result.ok)return setError(result.message);router.push("/dashboard")}
-  return <div className="bg-white rounded-2xl shadow-xl w-[420px] overflow-hidden"><div className="bg-gradient-to-r from-purple-600 to-orange-500 text-white text-center py-6 px-4"><h1 className="text-2xl font-semibold">Bem-vindo!</h1><p className="text-sm mt-1">Faça login para continuar</p></div><form onSubmit={submit} className="p-6 space-y-4"><div className="flex gap-3"><button type="button" onClick={()=>setRole("admin")} className={`flex-1 py-2 rounded-xl text-sm font-medium ${role==="admin"?"bg-purple-600 text-white":"bg-gray-200 text-gray-600"}`}>👜 Administrador</button><button type="button" onClick={()=>setRole("employee")} className={`flex-1 py-2 rounded-xl text-sm font-medium ${role==="employee"?"bg-orange-500 text-white":"bg-gray-200 text-gray-600"}`}>👤 Funcionário</button></div><label className="block text-sm font-medium text-gray-700">Email<div className="flex items-center border rounded-lg px-3 mt-1"><span>📧</span><input value={email} onChange={e=>setEmail(e.target.value)} type="email" className="w-full p-2 outline-none text-gray-800"/></div></label><label className="block text-sm font-medium text-gray-700">Senha<div className="flex items-center border rounded-lg px-3 mt-1"><span>🔒</span><input value={password} onChange={e=>setPassword(e.target.value)} type="password" className="w-full p-2 outline-none text-gray-800"/></div></label><button type="button" onClick={()=>router.push("/forgotPass")} className="block ml-auto text-sm text-purple-600 hover:underline">Esqueceu a senha?</button>{error&&<p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">{error}</p>}<button type="submit" className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-3 rounded-xl font-medium shadow-md">Entrar</button><p className="text-center text-xs text-gray-500">Conta de demonstração: bruno@modusdestinatio.com / 123456</p><p className="text-center text-sm text-gray-600">Não tem uma conta? <button type="button" onClick={()=>router.push("/SignUp")} className="text-purple-600 hover:underline">Cadastre-se</button></p></form></div>
+export default function LoginCard() {
+  const [role, setRole] = useState("admin")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
+
+  const router = useRouter()
+  const { login } = useApp()
+
+  async function submit(e) {
+    e.preventDefault()
+    setError("")
+
+    if (!email.trim() || !password) {
+      setError("Preencha e-mail e senha.")
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      const result = await login(email, password, role)
+
+      if (!result.ok) {
+        setError(result.message)
+        return
+      }
+
+      router.push("/dashboard")
+    } catch (error) {
+      console.error("Erro ao autenticar:", error)
+      setError("Não foi possível realizar o login. Tente novamente.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl shadow-xl w-[420px] max-w-full overflow-hidden">
+      <div className="bg-gradient-to-r from-purple-600 to-orange-500 text-white text-center py-6 px-4">
+        <h1 className="text-2xl font-semibold">
+          Bem-vindo!
+        </h1>
+        <p className="text-sm mt-1">
+          Faça login para continuar
+        </p>
+      </div>
+
+      <form onSubmit={submit} className="p-6 space-y-4">
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => setRole("admin")}
+            className={`flex-1 py-2 rounded-xl text-sm font-medium ${
+              role === "admin"
+                ? "bg-purple-600 text-white"
+                : "bg-gray-200 text-gray-600"
+            }`}
+          >
+            👜 Administrador
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRole("employee")}
+            className={`flex-1 py-2 rounded-xl text-sm font-medium ${
+              role === "employee"
+                ? "bg-orange-500 text-white"
+                : "bg-gray-200 text-gray-600"
+            }`}
+          >
+            👤 Funcionário
+          </button>
+        </div>
+
+        <label className="block text-sm font-medium text-gray-700">
+          E-mail
+          <div className="flex items-center border rounded-lg px-3 mt-1">
+            <span>📧</span>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              type="email"
+              autoComplete="email"
+              required
+              className="w-full p-2 outline-none text-gray-800"
+            />
+          </div>
+        </label>
+
+        <label className="block text-sm font-medium text-gray-700">
+          Senha
+          <div className="flex items-center border rounded-lg px-3 mt-1">
+            <span>🔒</span>
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              type="password"
+              autoComplete="current-password"
+              required
+              className="w-full p-2 outline-none text-gray-800"
+            />
+          </div>
+        </label>
+
+        <button
+          type="button"
+          onClick={() => router.push("/forgotPass")}
+          className="block ml-auto text-sm text-purple-600 hover:underline"
+        >
+          Esqueceu a senha?
+        </button>
+
+        {error && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">
+            {error}
+          </p>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-3 rounded-xl font-medium shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loading ? "Entrando..." : "Entrar"}
+        </button>
+
+        <p className="text-center text-sm text-gray-600">
+          Não tem uma conta?{" "}
+          <button
+            type="button"
+            onClick={() => router.push("/SignUp")}
+            className="text-purple-600 hover:underline"
+          >
+            Cadastre-se
+          </button>
+        </p>
+      </form>
+    </div>
+  )
 }

@@ -42,15 +42,16 @@ export function normalizeOrder(raw) {
     ? parseCurrency(raw.total)
     : items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
 
-  return {
-    ...raw,
-    id: raw.id || `#${Date.now().toString().slice(-6)}`,
-    customer: raw.customer || raw.supplier || "Cliente não informado",
-    supplier: raw.supplier || raw.customer || "Não informado",
-    operation: raw.operation || "Venda",
-    status: statusMap[raw.status] || raw.status || "waiting",
-    date: raw.date || new Date().toLocaleDateString("pt-BR"),
-    total,
-    items,
-  }
+ return {
+  ...raw,
+  stock_applied: raw.stock_applied === true,
+  id: raw.id || `#${Date.now().toString().slice(-6)}`,
+  customer: raw.customer || raw.supplier || "Cliente não informado",
+  supplier: raw.supplier || raw.customer || "Não informado",
+  operation: raw.operation || "Venda",
+  status: statusMap[raw.status] || raw.status || "waiting",
+  date: raw.date || new Date().toLocaleDateString("pt-BR"),
+  total,
+  items,
+}
 }

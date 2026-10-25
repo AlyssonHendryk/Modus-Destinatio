@@ -62,6 +62,7 @@ class OrderItem(BaseModel):
     unitPrice: float = Field(ge=0)
 
 
+
 class Order(BaseModel):
     id: str
     supplier: str
@@ -69,7 +70,9 @@ class Order(BaseModel):
     status: str
     date: str
     total: float
+    stock_applied: bool = False
     items: List[OrderItem] = Field(default_factory=list)
+
 
 
 class Product(BaseModel):
@@ -87,6 +90,7 @@ class StockMovement(BaseModel):
 # ============================================================
 # FUNÇÕES AUXILIARES
 # ============================================================
+
 
 def format_order(row):
 
@@ -110,6 +114,7 @@ def format_order(row):
         "status": row["status"],
         "date": row["order_date"],
         "total": float(row["total"]),
+        "stock_applied": row.get("stock_applied", False),
         "items": items,
     }
 
@@ -166,7 +171,6 @@ def get_orders():
             status_code=500,
             detail=str(error)
         )
-
 
 # ============================================================
 # POST - CRIAR PEDIDO

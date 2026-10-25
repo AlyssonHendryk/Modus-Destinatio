@@ -1,5 +1,5 @@
 "use client"
-
+import { supabase } from "@/lib/supabase"
 import {
   createContext,
   useContext,
@@ -75,7 +75,65 @@ export function AppProvider({ children }) {
     currentUserId,
     setCurrentUserId,
   ] = useState(null)
+  const [
+    authUser,
+    setAuthUser,
+  ] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  useEffect(() => {
+    let active = true
 
+async function loadAuthSession() {
+  try {
+    const { data, error } = await supabase.auth.getUser()
+
+    if (!active) return
+
+    if (error || !data.user) {
+      setAuthUser(null)
+      return
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("name, role, status")
+      .eq("id", data.user.id)
+      .single()
+
+    if (!active) return
+
+    if (profileError || !profile || profile.status !== "active") {
+      setAuthUser(null)
+      return
+    }
+
+    setAuthUser({
+      id: data.user.id,
+      email: data.user.email,
+      name: profile.name,
+      role: profile.role,
+      type: profile.role,
+      status: profile.status,
+    })
+  } catch (error) {
+    console.error("Erro ao verificar sessão:", error)
+
+    if (active) {
+      setAuthUser(null)
+    }
+  } finally {
+    if (active) {
+      setAuthLoading(false)
+    }
+  }
+}
+
+    loadAuthSession()
+
+    return () => {
+      active = false
+    }
+  }, [])
   // Indica comunicação com o backend
   const [
     ordersLoading,
@@ -282,15 +340,7 @@ export function AppProvider({ children }) {
   ])
 
 
-  const currentUser = useMemo(
-    () =>
-      users.find(
-        (user) =>
-          user.id === currentUserId
-      ) || null,
-
-    [users, currentUserId]
-  )
+  const currentUser = authUser
 
 
   /*
@@ -669,61 +719,63 @@ export function AppProvider({ children }) {
    * POST /api/auth/register
    */
 
-  function login(
-    email,
-    password,
-    type
-  ) {
+  async function login(email, password, type) {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    })
 
-    const user =
-      users.find(
-        (item) =>
-          item.email
-            .toLowerCase() ===
-          email
-            .trim()
-            .toLowerCase()
-      )
-
-    if (
-      !user ||
-      user.password !== password
-    ) {
-
+    if (error || !data.user) {
       return {
         ok: false,
-        message:
-          "E-mail ou senha inválidos.",
+        message: "E-mail ou senha inválidos.",
       }
     }
 
-    if (
-      user.status !== "active"
-    ) {
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("name, role, status")
+      .eq("id", data.user.id)
+      .single()
+
+    if (profileError || !profile) {
+      await supabase.auth.signOut()
 
       return {
         ok: false,
-        message:
-          "Este usuário está desativado.",
+        message: "Perfil do usuário não encontrado.",
       }
     }
 
-    if (
-      type &&
-      user.type !== type
-    ) {
+    if (profile.status !== "active") {
+      await supabase.auth.signOut()
 
       return {
         ok: false,
-
-        message:
-          "O perfil selecionado não corresponde a este usuário.",
+        message: "Este usuário está desativado.",
       }
     }
 
-    setCurrentUserId(
-      user.id
-    )
+    if (type && profile.role !== type) {
+      await supabase.auth.signOut()
+
+      return {
+        ok: false,
+        message: "O perfil selecionado não corresponde a este usuário.",
+      }
+    }
+
+    const user = {
+      id: data.user.id,
+      email: data.user.email,
+      name: profile.name,
+      role: profile.role,
+      type: profile.role,
+      status: profile.status,
+    }
+
+    setAuthUser(user)
+    setCurrentUserId(null)
 
     return {
       ok: true,
@@ -732,10 +784,16 @@ export function AppProvider({ children }) {
   }
 
 
-  function logout() {
+  async function logout() {
+    const { error } = await supabase.auth.signOut()
 
+    if (error) {
+      console.error("Erro ao encerrar sessão:", error)
+      throw new Error("Não foi possível encerrar a sessão.")
+    }
+
+    setAuthUser(null)
     setCurrentUserId(null)
-
   }
 
 
@@ -1077,6 +1135,9 @@ export function AppProvider({ children }) {
      * Sessão
      */
 
+    authLoading,
+
+    
     currentUser,
 
     login,

@@ -78,11 +78,11 @@ export function OrdersTable({
       PackageSearch
     ]
   }[status] || [
-    "bg-gray-50",
-    "text-gray-700",
-    "border-gray-200",
-    Clock
-  ])
+      "bg-gray-50",
+      "text-gray-700",
+      "border-gray-200",
+      Clock
+    ])
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -189,9 +189,10 @@ export function OrdersTable({
                     </td>
 
                     <td className="py-4 px-6">
+
                       <div className="flex gap-2">
 
-                        {!isCancelled && (
+                        {!isCancelled && order.stock_applied === true && (
                           <button
                             type="button"
                             onClick={(event) => {
@@ -215,7 +216,17 @@ export function OrdersTable({
                           </span>
                         )}
 
+                        {!isCancelled && order.stock_applied !== true && (
+                          <span
+                            className="text-xs text-gray-400 italic"
+                            title="Pedido antigo sem movimentação de estoque regularizada"
+                          >
+                            Edição bloqueada
+                          </span>
+                        )}
+
                       </div>
+
                     </td>
 
                   </tr>
