@@ -39,4 +39,18 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-__pycache__/main.cpython-314.pyc
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+venv/
+.venv/
+
+# Local IDE and operating-system files
+.vscode/
+.idea/
+*.log
+*.tmp
+Thumbs.db
+desktop.ini

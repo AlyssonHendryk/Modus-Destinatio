@@ -1,3 +1,6 @@
+import { supabase } from "../lib/supabase"
+import { parseCurrency } from "../utils/formatters.js"
+
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
 
@@ -79,30 +82,34 @@ function toBackendOrder(order) {
 
 
 function fromBackendOrder(order) {
+  const { total: rawTotal, ...fields } = order
+  const total = parseCurrency(rawTotal)
   return {
-    ...order,
-
-    total:
-      Number(order.total) || 0,
-
-    items: (order.items || []).map((item) => ({
-      ...item,
-
-      id: item.productId,
-
-      unitPrice:
-        Number(item.unitPrice) || 0,
-
-      // Mantemos price também para componentes antigos
-      // do frontend que ainda utilizem esse campo.
-      price:
-        Number(item.unitPrice) || 0,
-    })),
+    ...fields,
+    ...(total === undefined ? {} : { total }),
+    items: (order.items || []).map((item) => {
+      const { unitPrice: rawPrice, price: legacyPrice, ...operational } = item
+      const unitPrice = parseCurrency(rawPrice ?? legacyPrice)
+      return {
+        ...operational,
+        id: item.productId,
+        // Legacy alias is created only when a valid price actually exists.
+        ...(unitPrice === undefined ? {} : { unitPrice, price: unitPrice }),
+      }
+    }),
   }
 }
 
 
 async function request(endpoint, options = {}) {
+  // getSession refreshes an expired session through the existing Supabase client.
+  const { data, error } = await supabase.auth.getSession()
+  const accessToken = data?.session?.access_token
+  if (error || !accessToken) {
+    const sessionError = new Error("Sessão ausente ou expirada. Entre novamente.")
+    sessionError.status = 401
+    throw sessionError
+  }
   const response = await fetch(
     `${API_URL}${endpoint}`,
     {
@@ -111,6 +118,7 @@ async function request(endpoint, options = {}) {
       headers: {
         "Content-Type": "application/json",
         ...options.headers,
+        Authorization: `Bearer ${accessToken}`,
       },
     }
   )
@@ -148,7 +156,9 @@ async function request(endpoint, options = {}) {
       message
     )
 
-    throw new Error(message)
+    const requestError = new Error(message)
+    requestError.status = response.status
+    throw requestError
   }
 
   if (response.status === 204) {
@@ -213,6 +223,50 @@ export async function removeOrder(id) {
   )
 }
 
+
+export async function transitionOrderSeparation(orderId, action) {
+  if (!["start", "confirm"].includes(action)) {
+    throw new Error("Ação de separação inválida.")
+  }
+  // Operational response: do not normalize it as a complete financial order.
+  return request(`/api/orders/${encodeURIComponent(orderId)}/separation`, {
+    method: "PATCH",
+    body: JSON.stringify({ action }),
+  })
+}
+
+// ============================================================
+// ADMINISTRAÇÃO - CADASTRO DE FUNCIONÁRIO
+// ============================================================
+
+export async function createEmployee({ name, email, password }) {
+  return request("/api/admin/users", {
+    method: "POST",
+    // The API fixes role and status. Keep the password only in this request body.
+    body: JSON.stringify({ name, email, password }),
+  })
+}
+
+export async function getAdminUsers(page = 1, perPage = 25) {
+  const query = new URLSearchParams({ page: String(page), per_page: String(perPage) })
+  const data = await request(`/api/admin/users?${query.toString()}`)
+
+  if (!data || !Array.isArray(data.users) || !Number.isInteger(data.page) ||
+      !Number.isInteger(data.per_page) || !Number.isInteger(data.total)) {
+    throw new Error("O backend retornou uma lista de usuários inválida.")
+  }
+
+  // Keep only the directory fields explicitly exposed by the API.
+  return {
+    users: data.users.map(({ id, name, email, role, status, created_at }) => ({
+      id, name, email, role, status, created_at,
+    })),
+    page: data.page,
+    per_page: data.per_page,
+    total: data.total,
+  }
+}
+
 // ============================================================
 // PRODUTOS - CONSULTAR ESTOQUE
 // ============================================================
@@ -226,15 +280,18 @@ export async function getProducts() {
     )
   }
 
-  return data.map((product) => ({
+  return data.map((product) => {
+    const unitPrice = parseCurrency(product.unitPrice)
+    return {
     id: product.id,
     name: product.name,
     quantity: Number(product.quantity),
     min: Number(product.min),
     max: Number(product.max),
-    unitPrice: Number(product.unitPrice),
+    ...(unitPrice === undefined ? {} : { unitPrice }),
     active: product.active,
-  }))
+    }
+  })
 }
 // ============================================================
 // PRODUTOS - CADASTRAR

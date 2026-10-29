@@ -1,3 +1,6 @@
 fastapi
 uvicorn
 pydantic
+python-dotenv
+supabase
+PyJWT[crypto]>=2.10,<3

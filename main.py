@@ -1,11 +1,14 @@
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Literal, Optional
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from api_auth import AuthenticatedUser, require_active_user, require_admin
+from postgrest.exceptions import APIError
+from admin_users import router as admin_users_router
 
 
 # ============================================================
@@ -31,6 +34,8 @@ supabase: Client = create_client(
 app = FastAPI(
     title="Modus Destinatio - API"
 )
+app.state.profile_client = supabase
+private_api = APIRouter(dependencies=[Depends(require_active_user)])
 
 
 # ============================================================
@@ -53,7 +58,25 @@ app.add_middleware(
 # SCHEMAS
 # ============================================================
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+
+class SeparationAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["start", "confirm"]
+
+
+class SeparationRpcResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    order_id: str
+    status: Literal["separating", "completed"]
+    changed: bool
+
+
+class SeparationResponse(BaseModel):
+    orderId: str
+    status: Literal["separating", "completed"]
+    changed: bool
 
 class OrderItem(BaseModel):
     productId: str
@@ -86,6 +109,63 @@ class Product(BaseModel):
 
 class StockMovement(BaseModel):
     delta: int
+
+
+# Read contracts are independent of the administrative input models above.
+class OperationalOrderItemRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    productId: str
+    product: str
+    quantity: int
+
+
+class AdminOrderItemRead(OperationalOrderItemRead):
+    unitPrice: float
+
+
+class OperationalOrderRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    supplier: str
+    operation: str
+    status: str
+    date: str
+    items: List[OperationalOrderItemRead]
+
+
+class AdminOrderRead(OperationalOrderRead):
+    total: float
+    stock_applied: bool = False
+    items: List[AdminOrderItemRead]
+
+
+class OperationalProductRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    name: str
+    quantity: int
+    min: int
+    max: int
+    active: bool
+
+
+class AdminProductRead(OperationalProductRead):
+    unitPrice: float
+
+
+STOCK_MOVEMENT_FIELDS = (
+    "id", "product_id", "delta", "previous_quantity", "new_quantity", "created_at",
+)
+
+
+class StockMovementRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str | int
+    product_id: str
+    delta: int
+    previous_quantity: int
+    new_quantity: int
+    created_at: str
 
 # ============================================================
 # FUNÇÕES AUXILIARES
@@ -141,18 +221,24 @@ def get_order_from_database(order_id: str):
 # GET - LISTAR PEDIDOS
 # ============================================================
 
-@app.get(
+@private_api.get(
     "/api/orders",
-    response_model=List[Order]
+    response_model=List[AdminOrderRead | OperationalOrderRead]
 )
-def get_orders():
+def get_orders(user: AuthenticatedUser = Depends(require_active_user)):
 
     try:
+
+        columns = "id,supplier,operation,status,order_date"
+        if user.role == "admin":
+            columns += ",total,stock_applied,order_items(product_id,product,quantity,unit_price)"
+        else:
+            columns += ",order_items(product_id,product,quantity)"
 
         response = (
             supabase
             .table("orders")
-            .select("*, order_items(*)")
+            .select(columns)
             .order(
                 "created_at",
                 desc=True
@@ -160,25 +246,28 @@ def get_orders():
             .execute()
         )
 
-        return [
-            format_order(order)
-            for order in response.data
-        ]
+        if user.role == "admin":
+            return [AdminOrderRead(**format_order(row)) for row in response.data]
 
-    except Exception as error:
+        return [OperationalOrderRead(
+            id=row["id"], supplier=row["supplier"], operation=row["operation"],
+            status=row["status"], date=row["order_date"],
+            items=[OperationalOrderItemRead(
+                productId=item["product_id"], product=item["product"], quantity=item["quantity"],
+            ) for item in row.get("order_items", [])],
+        ) for row in response.data]
 
-        raise HTTPException(
-            status_code=500,
-            detail=str(error)
-        )
+    except Exception:
+        raise HTTPException(500, "Não foi possível consultar os pedidos.") from None
 
 # ============================================================
 # POST - CRIAR PEDIDO
 # ============================================================
 
-@app.post(
+@private_api.post(
     "/api/orders",
-    response_model=Order
+    response_model=Order,
+    dependencies=[Depends(require_admin)],
 )
 
 def create_order(order: Order):
@@ -264,9 +353,10 @@ def create_order(order: Order):
 # PUT - ATUALIZAR PEDIDO
 # ============================================================
 
-@app.put(
+@private_api.put(
     "/api/orders/{order_id}",
-    response_model=Order
+    response_model=Order,
+    dependencies=[Depends(require_admin)],
 )
 
 def update_order(order_id: str, updated_order: Order):
@@ -365,11 +455,50 @@ def update_order(order_id: str, updated_order: Order):
         )
 
 # ============================================================
+# PATCH - SEPARAÇÃO DE PEDIDO (SEM MOVIMENTAÇÃO DE ESTOQUE)
+# ============================================================
+
+@private_api.patch("/api/orders/{order_id}/separation", response_model=SeparationResponse)
+def transition_order_separation(order_id: str, action: SeparationAction):
+    try:
+        response = supabase.rpc(
+            "transition_order_separation",
+            {"p_order_id": order_id, "p_action": action.action},
+        ).execute()
+    except APIError as error:
+        errors = {
+            "P2001": (422, "Solicitação de separação inválida."),
+            "P2002": (404, "Pedido não encontrado."),
+            "P2003": (409, "Pedido sem estoque aplicado para separação."),
+            "P2004": (409, "Transição de separação não permitida."),
+            "P2005": (500, "Não foi possível atualizar a separação."),
+        }
+        status, message = errors.get(str(error.code), (500, "Erro interno ao separar pedido."))
+        raise HTTPException(status_code=status, detail=message) from None
+    except Exception:
+        raise HTTPException(500, "Não foi possível executar a separação.") from None
+
+    try:
+        rows = response.data
+        if not isinstance(rows, list) or len(rows) != 1:
+            raise ValueError()
+        result = SeparationRpcResult.model_validate(rows[0])
+        expected_status = "separating" if action.action == "start" else "completed"
+        if result.order_id != order_id or result.status != expected_status:
+            raise ValueError()
+    except (ValidationError, ValueError, TypeError, AttributeError):
+        raise HTTPException(502, "Resposta inválida do serviço de separação.") from None
+
+    return SeparationResponse(orderId=result.order_id, status=result.status, changed=result.changed)
+
+
+# ============================================================
 # DELETE - EXCLUIR PEDIDO
 # ============================================================
 
-@app.delete(
-    "/api/orders/{order_id}"
+@private_api.delete(
+    "/api/orders/{order_id}",
+    dependencies=[Depends(require_admin)],
 )
 def delete_order(order_id: str):
 
@@ -425,7 +554,7 @@ def delete_order(order_id: str):
 # PATCH - MOVIMENTAÇÃO DE ESTOQUE
 # ============================================================
 
-@app.patch("/api/products/{product_id}/stock")
+@private_api.patch("/api/products/{product_id}/stock", dependencies=[Depends(require_admin)])
 def move_product_stock(product_id: str, movement: StockMovement):
     try:
         response = supabase.rpc(
@@ -466,36 +595,37 @@ def move_product_stock(product_id: str, movement: StockMovement):
 # GET - HISTÓRICO DE MOVIMENTAÇÕES DE ESTOQUE
 # ============================================================
 
-@app.get("/api/stock-movements")
+@private_api.get("/api/stock-movements", response_model=List[StockMovementRead])
 def get_stock_movements():
     try:
         response = (
             supabase
             .table("stock_movements")
-            .select("*")
+            .select(",".join(STOCK_MOVEMENT_FIELDS))
             .order("created_at", desc=True)
             .limit(100)
             .execute()
         )
 
-        return response.data
+        return [StockMovementRead(**{field: row[field] for field in STOCK_MOVEMENT_FIELDS})
+                for row in response.data]
 
-    except Exception as error:
-        raise HTTPException(
-            status_code=500,
-            detail=str(error)
-        )
+    except Exception:
+        raise HTTPException(500, "Não foi possível consultar as movimentações.") from None
 # ============================================================
 # GET - LISTAR PRODUTOS
 # ============================================================
 
-@app.get("/api/products")
-def get_products():
+@private_api.get("/api/products", response_model=List[AdminProductRead | OperationalProductRead])
+def get_products(user: AuthenticatedUser = Depends(require_active_user)):
     try:
+        columns = "id,name,quantity,min,max,active"
+        if user.role == "admin":
+            columns += ",unit_price"
         response = (
             supabase
             .table("products")
-            .select("*")
+            .select(columns)
             .order("name")
             .execute()
         )
@@ -503,23 +633,23 @@ def get_products():
         products = []
 
         for product in response.data:
-            products.append({
+            fields = {
                 "id": product["id"],
                 "name": product["name"],
                 "quantity": product["quantity"],
                 "min": product["min"],
                 "max": product["max"],
-                "unitPrice": float(product["unit_price"]),
                 "active": product["active"]
-            })
+            }
+            if user.role == "admin":
+                products.append(AdminProductRead(**fields, unitPrice=float(product["unit_price"])))
+            else:
+                products.append(OperationalProductRead(**fields))
 
         return products
 
-    except Exception as error:
-        raise HTTPException(
-            status_code=500,
-            detail=str(error)
-        )
+    except Exception:
+        raise HTTPException(500, "Não foi possível consultar os produtos.") from None
 
 
 
@@ -527,7 +657,7 @@ def get_products():
 # POST - CADASTRAR PRODUTO
 # ============================================================
 
-@app.post("/api/products", response_model=Product, status_code=201)
+@private_api.post("/api/products", response_model=Product, status_code=201, dependencies=[Depends(require_admin)])
 def create_product(product: Product):
     if (
         not product.id.strip()
@@ -598,7 +728,7 @@ def create_product(product: Product):
 # PUT - ATUALIZAR PRODUTO
 # ============================================================
 
-@app.put("/api/products/{product_id}", response_model=Product)
+@private_api.put("/api/products/{product_id}", response_model=Product, dependencies=[Depends(require_admin)])
 def update_product(product_id: str, product: Product):
     if product.id != product_id:
         raise HTTPException(
@@ -683,7 +813,7 @@ def update_product(product_id: str, product: Product):
 # DELETE - EXCLUIR PRODUTO
 # ============================================================
 
-@app.delete("/api/products/{product_id}")
+@private_api.delete("/api/products/{product_id}", dependencies=[Depends(require_admin)])
 def delete_product(product_id: str):
     try:
         # Verifica se o produto existe
@@ -768,6 +898,9 @@ def health():
 # ============================================================
 # EXECUÇÃO
 # ============================================================
+
+app.include_router(private_api)
+app.include_router(admin_users_router)
 
 if __name__ == "__main__":
 

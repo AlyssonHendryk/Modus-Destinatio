@@ -4,10 +4,12 @@ import { useMemo, useState } from "react"
 import { AlertTriangle, Plus, Minus, Trash2, Edit2, Save, X } from "lucide-react"
 import { useApp } from "@/context/AppContext"
 import { formatCurrency } from "@/utils/formatters"
+import { canViewFinancials } from "@/utils/financialPresentation"
 
 
 export default function InventoryTable({ compact = false, search = "" }) {
-  const { inventory, saveProduct, deleteProduct, changeStock } = useApp()
+  const { inventory, saveProduct, deleteProduct, changeStock, currentUser } = useApp()
+  const isAdmin = canViewFinancials(currentUser)
 
   const [editing, setEditing] = useState(null)
   const [showForm, setShowForm] = useState(false)
@@ -38,12 +40,14 @@ export default function InventoryTable({ compact = false, search = "" }) {
 
 
   function openCreate() {
+    if (!isAdmin) return
     setEditing(null)
     setForm({ name: "", quantity: 0, max: 100, min: 10, unitPrice: 0, active: true })
     setShowForm(true)
   }
 
   function openEdit(item) {
+    if (!isAdmin) return
     setEditing(item.id)
     setForm(item)
     setShowForm(true)
@@ -51,6 +55,7 @@ export default function InventoryTable({ compact = false, search = "" }) {
 
   async function submit(e) {
     e.preventDefault()
+    if (!isAdmin) return
 
     if (!form.name.trim()) {
       return
@@ -78,6 +83,7 @@ export default function InventoryTable({ compact = false, search = "" }) {
     }
   }
   async function handleStockChange(id, delta) {
+    if (!isAdmin) return
     if (movingProductId !== null) return
 
     setMovingProductId(id)
@@ -96,6 +102,7 @@ export default function InventoryTable({ compact = false, search = "" }) {
     }
   }
   async function handleDeleteProduct(item) {
+    if (!isAdmin) return
     const confirmed = window.confirm(
       `Deseja realmente excluir o produto "${item.name}"?`
     )
@@ -119,11 +126,11 @@ export default function InventoryTable({ compact = false, search = "" }) {
     <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
       <div className="flex items-center justify-between mb-6">
         <div><h2 className="text-gray-900 font-semibold mb-1">Itens Armazenados</h2><p className="text-sm text-gray-500">Status e movimentação do estoque</p></div>
-        {!compact && <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl"><Plus className="w-4 h-4" />Novo produto</button>}
+        {isAdmin && !compact && <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl"><Plus className="w-4 h-4" />Novo produto</button>}
       </div>
 
 
-      {showForm && !compact && (
+      {isAdmin && showForm && !compact && (
         <form
           onSubmit={submit}
           className="mb-6 border rounded-xl p-4 grid md:grid-cols-6 gap-3 bg-gray-50"
@@ -233,12 +240,12 @@ export default function InventoryTable({ compact = false, search = "" }) {
               </div>
 
               <p className="text-xs text-gray-500">
-                {item.id} • {formatCurrency(item.unitPrice)}
+                {item.id}{isAdmin && <> • {formatCurrency(item.unitPrice)}</>}
               </p>
             </div>
 
             <div className="flex items-center gap-2">
-              <button
+              {isAdmin && <button
                 type="button"
                 onClick={() => handleStockChange(item.id, -1)}
                 disabled={movingProductId !== null}
@@ -246,13 +253,13 @@ export default function InventoryTable({ compact = false, search = "" }) {
                 title="Diminuir"
               >
                 <Minus className="w-4 h-4" />
-              </button>
+              </button>}
 
               <span className="min-w-16 text-center text-sm font-semibold text-gray-900">
                 {item.quantity} un
               </span>
 
-              <button
+              {isAdmin && <button
                 type="button"
                 onClick={() => handleStockChange(item.id, 1)}
                 disabled={movingProductId !== null}
@@ -260,9 +267,9 @@ export default function InventoryTable({ compact = false, search = "" }) {
                 title="Aumentar"
               >
                 <Plus className="w-4 h-4" />
-              </button>
+              </button>}
 
-              {!compact && (
+              {isAdmin && !compact && (
                 <>
                   <button
                     type="button"
@@ -280,7 +287,7 @@ export default function InventoryTable({ compact = false, search = "" }) {
                     title="Excluir produto"
                   >
                     <Trash2 className="w-4 h-4" />
-                  </button>s
+                  </button>
                 </>
               )}
             </div>

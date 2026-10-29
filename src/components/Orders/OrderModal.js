@@ -1,41 +1,31 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { X, Plus, Trash2, Minus } from "lucide-react"
 import { formatCurrency } from "@/utils/formatters"
+import { useApp } from "@/context/AppContext"
+import { canViewFinancials, sumFinancialValues } from "@/utils/financialPresentation"
 
-export default function OrderModal({ isOpen, onClose, onSave, orderToEdit, inventory = [] }) {
-  const [id, setId] = useState("")
-  const [customer, setCustomer] = useState("")
-  const [supplier, setSupplier] = useState("")
-  const [operation, setOperation] = useState("Venda")
-  const [status, setStatus] = useState("waiting")
-  const [items, setItems] = useState([])
+export default function OrderModal(props) {
+  const { currentUser } = useApp()
+  if (!props.isOpen || !canViewFinancials(currentUser)) return null
+  return <OrderForm key={props.orderToEdit?.id || "new"} {...props}/>
+}
+
+function OrderForm({ onClose, onSave, orderToEdit, inventory = [] }) {
+  const [id] = useState(() => orderToEdit?.id || `#${Date.now().toString().slice(-6)}`)
+  const [customer, setCustomer] = useState(orderToEdit?.customer || "")
+  const [supplier, setSupplier] = useState(orderToEdit?.supplier || "")
+  const [operation, setOperation] = useState(orderToEdit?.operation || "Venda")
+  const [status, setStatus] = useState(orderToEdit?.status || "waiting")
+  const [items, setItems] = useState(orderToEdit?.items || [])
   const [error, setError] = useState("")
 
-  useEffect(() => {
-    if (!isOpen) return
-    if (orderToEdit) {
-      setId(orderToEdit.id)
-      setCustomer(orderToEdit.customer || "")
-      setSupplier(orderToEdit.supplier || "")
-      setOperation(orderToEdit.operation || "Venda")
-      setStatus(orderToEdit.status || "waiting")
-      setItems(orderToEdit.items || [])
-    } else {
-      setId(`#${Date.now().toString().slice(-6)}`)
-      setCustomer("")
-      setSupplier("")
-      setOperation("Venda")
-      setStatus("waiting")
-      setItems([])
-    }
-    setError("")
-  }, [isOpen, orderToEdit])
-
-  const total = useMemo(() => items.reduce((sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0), 0), [items])
-
-  if (!isOpen) return null
+  const total = useMemo(() => sumFinancialValues(items.map(item =>
+    typeof item.unitPrice === "number" && Number.isFinite(item.unitPrice) &&
+    typeof item.quantity === "number" && Number.isFinite(item.quantity)
+      ? item.unitPrice * item.quantity : undefined
+  )), [items])
 
   function addItem() {
     const first = inventory.find((p) => p.active !== false)
@@ -43,7 +33,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit, inven
       productId: first?.id || `P${Date.now().toString().slice(-4)}`,
       product: first?.name || "",
       quantity: 1,
-      unitPrice: first?.unitPrice || 0,
+      unitPrice: first?.unitPrice,
     }])
   }
 
@@ -78,7 +68,9 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit, inven
     e.preventDefault()
     if (!customer.trim() || !supplier.trim()) return setError("Informe cliente e fornecedor/origem.")
     if (items.length === 0) return setError("Adicione pelo menos um item ao pedido.")
-    if (items.some((item) => !item.product.trim() || item.quantity < 1 || item.unitPrice < 0)) return setError("Revise os itens do pedido.")
+    if (total === undefined || items.some((item) => !item.product.trim() ||
+      !Number.isFinite(item.quantity) || item.quantity < 1 ||
+      !Number.isFinite(item.unitPrice) || item.unitPrice < 0)) return setError("Revise os itens do pedido.")
     if (operation === "Venda") {
       const unavailable = items.find((item) => {
         const product = inventory.find((p) => p.id === item.productId)
@@ -108,7 +100,7 @@ export default function OrderModal({ isOpen, onClose, onSave, orderToEdit, inven
                 {inventory.length ? <select value={item.productId} onChange={(e) => selectProduct(index, e.target.value)} className="mt-1 w-full border rounded-lg p-2 bg-white text-gray-900">{inventory.filter((p) => p.active !== false).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.quantity} un)</option>)}</select> : <input value={item.product} onChange={(e) => changeItem(index, { product: e.target.value })} className="mt-1 w-full border rounded-lg p-2" />}
               </label>
               <div className="col-span-7 md:col-span-3"><p className="text-xs text-gray-600 mb-1">Quantidade</p><div className="flex items-center border rounded-lg"><button type="button" onClick={() => changeQuantity(index, -1)} className="p-2"><Minus className="w-4 h-4" /></button><input type="number" min="1" value={item.quantity} onChange={(e) => changeItem(index, { quantity: Math.max(1, Number(e.target.value) || 1) })} className="w-full text-center outline-none" /><button type="button" onClick={() => changeQuantity(index, 1)} className="p-2"><Plus className="w-4 h-4" /></button></div></div>
-              <label className="col-span-4 md:col-span-3 text-xs text-gray-600">Preço unitário<input type="number" min="0" step="0.01" value={item.unitPrice} onChange={(e) => changeItem(index, { unitPrice: Number(e.target.value) || 0 })} className="mt-1 w-full border rounded-lg p-2 text-gray-900" /></label>
+              <label className="col-span-4 md:col-span-3 text-xs text-gray-600">Preço unitário<input type="number" min="0" step="0.01" value={item.unitPrice ?? ""} onChange={(e) => changeItem(index, { unitPrice: e.target.value === "" ? undefined : Number(e.target.value) })} className="mt-1 w-full border rounded-lg p-2 text-gray-900" /></label>
               <button type="button" onClick={() => removeItem(index)} className="col-span-1 p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>
             </div>)}
           </div>

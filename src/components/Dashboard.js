@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useApp } from "@/context/AppContext"
+import { canViewFinancials } from "@/utils/financialPresentation"
 
 // Componentes do Dashboard
 import Sidebar from "./dashboard/Sidebar"
@@ -38,6 +39,7 @@ export default function Dashboard({ initialTab = "dashboard" }) {
     deleteOrder,
     updateOrderStatus,
   } = useApp()
+  const isAdmin = canViewFinancials(currentUser)
 
   const [activeTab, setActiveTab] = useState(initialTab)
   const [search, setSearch] = useState("")
@@ -97,22 +99,26 @@ export default function Dashboard({ initialTab = "dashboard" }) {
   // ============================================================
 
   function openCreate() {
+    if (!isAdmin) return
     setEditingOrder(null)
     setIsModalOpen(true)
   }
 
   function openEdit(order) {
+    if (!isAdmin) return
     setEditingOrder(order)
     setIsModalOpen(true)
   }
 
   function handleSaveOrder(order) {
+    if (!isAdmin) return
     saveOrder(order)
     setIsModalOpen(false)
     setEditingOrder(null)
   }
 
   function handleDeleteOrder(id) {
+    if (!isAdmin) return
     const confirmed = window.confirm(
       `Deseja realmente excluir o pedido ${id}?`
     )
@@ -274,7 +280,7 @@ export default function Dashboard({ initialTab = "dashboard" }) {
       ==================================================== */}
 
       <OrderModal
-        isOpen={isModalOpen}
+        isOpen={isAdmin && isModalOpen}
         onClose={() => {
           setIsModalOpen(false)
           setEditingOrder(null)

@@ -1,14 +1,82 @@
 "use client"
+import { useRef, useState } from "react"
 import { User, Package, Play, CheckCircle, Clock, PackageSearch, Truck, XCircle } from "lucide-react"
 
 export default function OrderSeparationGrid({ orders = [], onStatusChange }) {
+  const inFlight = useRef(new Set())
+  const [pending, setPending] = useState({})
+  const [errors, setErrors] = useState({})
+
+  async function handleTransition(id, action) {
+    if (!action || !onStatusChange || inFlight.current.has(id)) return
+    inFlight.current.add(id)
+    setPending((current) => ({ ...current, [id]: true }))
+    setErrors((current) => ({ ...current, [id]: "" }))
+    try {
+      await onStatusChange(id, action)
+    } catch (error) {
+      setErrors((current) => ({ ...current, [id]: error.message || "Não foi possível atualizar a separação." }))
+    } finally {
+      inFlight.current.delete(id)
+      setPending((current) => ({ ...current, [id]: false }))
+    }
+  }
+
   const configs = {
-    waiting: { label:"Aguardando", badge:"bg-purple-50 text-purple-700 border-purple-200", icon:Clock, button:"Iniciar Separação", buttonClass:"bg-purple-600 hover:bg-purple-700", next:"separating" },
-    separating: { label:"Em Separação", badge:"bg-orange-50 text-orange-700 border-orange-200", icon:PackageSearch, button:"Concluir Separação", buttonClass:"bg-orange-500 hover:bg-orange-600", next:"completed" },
+    waiting: { label:"Aguardando", badge:"bg-purple-50 text-purple-700 border-purple-200", icon:Clock, button:"Iniciar Separação", buttonClass:"bg-purple-600 hover:bg-purple-700", next:"start" },
+    separating: { label:"Em Separação", badge:"bg-orange-50 text-orange-700 border-orange-200", icon:PackageSearch, button:"Concluir Separação", buttonClass:"bg-orange-500 hover:bg-orange-600", next:"confirm" },
     shipped: { label:"Em rota", badge:"bg-blue-50 text-blue-700 border-blue-200", icon:Truck, button:"Em rota", buttonClass:"bg-gray-100 text-gray-400", next:null },
     completed: { label:"Concluído", badge:"bg-green-50 text-green-700 border-green-200", icon:CheckCircle, button:"Separação concluída", buttonClass:"bg-gray-100 text-gray-400", next:null },
     cancelled: { label:"Cancelado", badge:"bg-red-50 text-red-700 border-red-200", icon:XCircle, button:"Pedido cancelado", buttonClass:"bg-gray-100 text-gray-400", next:null },
   }
   if (!orders.length) return <div className="bg-white border rounded-2xl p-10 text-center text-gray-500">Nenhum pedido neste filtro.</div>
-  return <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">{orders.map(order=>{const c=configs[order.status]||configs.waiting;const StatusIcon=c.icon;return <div key={order.id} className="bg-white border rounded-2xl shadow-sm overflow-hidden flex flex-col"><div className="p-6 flex-1"><div className="flex justify-between mb-5"><div><h3 className="font-bold text-gray-900">PEDIDO {order.id}</h3><span className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border ${c.badge}`}><StatusIcon className="w-3.5 h-3.5"/>{c.label}</span></div><div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-orange-500 rounded-xl flex items-center justify-center"><Package className="w-6 h-6 text-white"/></div></div><div className="flex items-center gap-2 text-gray-700 mb-4"><User className="w-4 h-4 text-gray-400"/><span className="text-sm">Cliente: <b>{order.customer}</b></span></div><p className="text-xs text-gray-500 uppercase mb-2">Produtos</p><ul className="space-y-2">{(order.items||[]).map((item,index)=><li key={`${item.productId}-${index}`} className="flex items-center gap-2 text-sm text-gray-700"><span className="w-1.5 h-1.5 bg-purple-500 rounded-full"/><span>{item.product}</span><span className="ml-auto px-2 py-0.5 bg-gray-100 rounded-full text-xs font-semibold">{item.quantity}</span></li>)}</ul></div><div className="px-6 pb-6"><button type="button" disabled={!c.next} onClick={()=>c.next&&onStatusChange?.(order.id,c.next)} className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold ${c.buttonClass} ${c.next?"text-white":"cursor-not-allowed"}`}>{c.next?<Play className="w-4 h-4"/>:<CheckCircle className="w-4 h-4"/>}{c.button}</button></div></div>})}</div>
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+      {orders.map((order) => {
+        const c = configs[order.status] || configs.waiting
+        const StatusIcon = c.icon
+        return (
+          <div key={order.id} className="bg-white border rounded-2xl shadow-sm overflow-hidden flex flex-col">
+            <div className="p-6 flex-1">
+              <div className="flex justify-between mb-5">
+                <div>
+                  <h3 className="font-bold text-gray-900">PEDIDO {order.id}</h3>
+                  <span className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border ${c.badge}`}>
+                    <StatusIcon className="w-3.5 h-3.5"/>{c.label}
+                  </span>
+                </div>
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-orange-500 rounded-xl flex items-center justify-center">
+                  <Package className="w-6 h-6 text-white"/>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-gray-700 mb-4">
+                <User className="w-4 h-4 text-gray-400"/>
+                <span className="text-sm">Cliente: <b>{order.customer}</b></span>
+              </div>
+              <p className="text-xs text-gray-500 uppercase mb-2">Produtos</p>
+              <ul className="space-y-2">
+                {(order.items || []).map((item, index) => (
+                  <li key={`${item.productId}-${index}`} className="flex items-center gap-2 text-sm text-gray-700">
+                    <span className="w-1.5 h-1.5 bg-purple-500 rounded-full"/>
+                    <span>{item.product}</span>
+                    <span className="ml-auto px-2 py-0.5 bg-gray-100 rounded-full text-xs font-semibold">{item.quantity}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="px-6 pb-6">
+              <button type="button" disabled={!c.next || Boolean(pending[order.id])}
+                aria-busy={Boolean(pending[order.id])}
+                onClick={() => handleTransition(order.id, c.next)}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold ${c.buttonClass} ${c.next ? "text-white" : "cursor-not-allowed"}`}>
+                {c.next ? <Play className="w-4 h-4"/> : <CheckCircle className="w-4 h-4"/>}
+                {pending[order.id] ? "Processando..." : c.button}
+              </button>
+              {errors[order.id] && <p role="alert" className="mt-2 text-sm text-red-600">{errors[order.id]}</p>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }

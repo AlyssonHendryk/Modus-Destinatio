@@ -1,7 +1,9 @@
 
 "use client"
 
-import { useEffect, useState, Fragment } from "react"
+import { useState, Fragment } from "react"
+import { useApp } from "@/context/AppContext"
+import { canViewFinancials } from "@/utils/financialPresentation"
 
 import {
   ChevronDown,
@@ -25,8 +27,10 @@ export function OrdersTable({
   orders = [],
   onEditClick
 }) {
+  const { currentUser } = useApp()
+  const isAdmin = canViewFinancials(currentUser)
   const [expandedOrder, setExpandedOrder] = useState(null)
-  const [currentPage, setCurrentPage] = useState(1)
+  const [page, setCurrentPage] = useState(1)
 
   const pageSize = 8
 
@@ -35,11 +39,7 @@ export function OrdersTable({
     Math.ceil(orders.length / pageSize)
   )
 
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages)
-    }
-  }, [currentPage, totalPages])
+  const currentPage = Math.min(page, totalPages)
 
   const pageOrders = orders.slice(
     (currentPage - 1) * pageSize,
@@ -98,8 +98,7 @@ export function OrdersTable({
                 "Operação",
                 "Status",
                 "Data",
-                "Valor Total",
-                "Ações"
+                ...(isAdmin ? ["Valor Total", "Ações"] : [])
               ].map((heading) => (
                 <th
                   key={heading}
@@ -115,7 +114,7 @@ export function OrdersTable({
             {pageOrders.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={isAdmin ? 7 : 5}
                   className="p-10 text-center text-gray-500"
                 >
                   Nenhum pedido encontrado.
@@ -184,12 +183,11 @@ export function OrdersTable({
                       {order.date}
                     </td>
 
-                    <td className="py-4 px-6 font-medium text-gray-900">
+                    {isAdmin && <td className="py-4 px-6 font-medium text-gray-900">
                       {formatCurrency(order.total)}
-                    </td>
+                    </td>}
 
-                    <td className="py-4 px-6">
-
+                    {isAdmin && <td className="py-4 px-6">
                       <div className="flex gap-2">
 
                         {!isCancelled && order.stock_applied === true && (
@@ -227,14 +225,14 @@ export function OrdersTable({
 
                       </div>
 
-                    </td>
+                    </td>}
 
                   </tr>
 
                   {expanded && (
                     <tr>
                       <td
-                        colSpan={7}
+                        colSpan={isAdmin ? 7 : 5}
                         className="bg-gray-50 p-5"
                       >
                         <div className="bg-white border rounded-xl overflow-hidden">
@@ -246,8 +244,7 @@ export function OrdersTable({
                                   "ID Produto",
                                   "Produto",
                                   "Quantidade",
-                                  "Preço unitário",
-                                  "Subtotal"
+                                  ...(isAdmin ? ["Preço unitário", "Subtotal"] : [])
                                 ].map((heading) => (
                                   <th
                                     key={heading}
@@ -277,15 +274,17 @@ export function OrdersTable({
                                     {item.quantity}
                                   </td>
 
-                                  <td className="p-3">
+                                  {isAdmin && <td className="p-3">
                                     {formatCurrency(item.unitPrice)}
-                                  </td>
+                                  </td>}
 
-                                  <td className="p-3 font-medium">
+                                  {isAdmin && <td className="p-3 font-medium">
                                     {formatCurrency(
-                                      item.unitPrice * item.quantity
+                                      typeof item.unitPrice === "number" && Number.isFinite(item.unitPrice) &&
+                                      typeof item.quantity === "number" && Number.isFinite(item.quantity)
+                                        ? item.unitPrice * item.quantity : undefined
                                     )}
-                                  </td>
+                                  </td>}
                                 </tr>
                               ))}
                             </tbody>
@@ -318,9 +317,7 @@ export function OrdersTable({
             type="button"
             disabled={currentPage === 1}
             onClick={() => {
-              setCurrentPage((page) =>
-                Math.max(1, page - 1)
-              )
+              setCurrentPage(Math.max(1, currentPage - 1))
             }}
             className="p-2 border rounded-lg disabled:opacity-40"
             aria-label="Página anterior"
@@ -332,9 +329,7 @@ export function OrdersTable({
             type="button"
             disabled={currentPage === totalPages}
             onClick={() => {
-              setCurrentPage((page) =>
-                Math.min(totalPages, page + 1)
-              )
+              setCurrentPage(Math.min(totalPages, currentPage + 1))
             }}
             className="p-2 border rounded-lg disabled:opacity-40"
             aria-label="Próxima página"

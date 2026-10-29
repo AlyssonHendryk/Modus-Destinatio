@@ -2,25 +2,28 @@
 import { supabase } from "@/lib/supabase"
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
-  useMemo,
+  useRef,
   useState,
 } from "react"
 
 import {
-  initialInventory,
-  initialOrders,
   initialTasks,
-  initialUsers,
 } from "@/data/mockData"
 
-import { normalizeOrder } from "@/utils/formatters"
+import { normalizeOrder, parseCurrency } from "@/utils/formatters"
+import {
+  loadOperationalCache, persistOperationalCache, sanitizeAppCaches,
+  projectOrders, projectProducts,
+} from "@/utils/operationalCache"
 
 import {
   getOrders,
   createOrder,
   updateOrder,
+  transitionOrderSeparation,
   removeOrder,
   getProducts,
   createProduct,
@@ -30,27 +33,7 @@ import {
   getStockMovements,
 } from "@/services/backend"
 
-const STORAGE_KEY = "modusdestinatio_state_v1"
-
 const AppContext = createContext(null)
-
-function loadState() {
-  if (typeof window === "undefined") {
-    return null
-  }
-
-  try {
-    const saved =
-      localStorage.getItem(STORAGE_KEY)
-
-    return saved
-      ? JSON.parse(saved)
-      : null
-
-  } catch {
-    return null
-  }
-}
 
 export function AppProvider({ children }) {
 
@@ -58,18 +41,16 @@ export function AppProvider({ children }) {
     useState(false)
 
   const [orders, setOrders] =
-    useState(
-      initialOrders.map(normalizeOrder)
-    )
+    useState([])
 
   const [inventory, setInventory] =
-    useState(initialInventory)
+    useState([])
 
   const [users, setUsers] =
-    useState(initialUsers)
+    useState([])
 
   const [tasks, setTasks] =
-    useState(initialTasks)
+    useState([])
 
   const [
     currentUserId,
@@ -80,76 +61,127 @@ export function AppProvider({ children }) {
     setAuthUser,
   ] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [ordersLoading, setOrdersLoading] = useState(false)
+  const [backendError, setBackendError] = useState(null)
+  const [stockMovements, setStockMovements] = useState([])
+  const authVersion = useRef(0)
+  const dataVersion = useRef(0)
+  const authenticatedId = useRef(null)
+  const authenticatedRole = useRef(null)
+  const profileValidating = useRef(true)
+  const loginPending = useRef(false)
+
+  const applyAuthUser = useCallback((user) => {
+    if (authenticatedId.current !== (user?.id ?? null) ||
+        authenticatedRole.current !== (user?.role ?? null) || !user) {
+      // Invalidate pending reads/mutations before React renders the new session.
+      dataVersion.current += 1
+      authenticatedId.current = user?.id ?? null
+      authenticatedRole.current = user?.role ?? null
+      setOrders([])
+      setInventory([])
+      setStockMovements([])
+      setUsers([])
+      setTasks([])
+      setCurrentUserId(null)
+      setBackendError(null)
+      setOrdersLoading(false)
+      setHydrated(false)
+    }
+    profileValidating.current = false
+    setAuthUser(user)
+    setAuthLoading(false)
+  }, [])
+
   useEffect(() => {
     let active = true
+    let timer
+    // Sanitize all known app copies before any cache can be restored.
+    try { sanitizeAppCaches(window.localStorage || localStorage, window.sessionStorage) } catch { /* storage unavailable */ }
 
-async function loadAuthSession() {
-  try {
-    const { data, error } = await supabase.auth.getUser()
-
-    if (!active) return
-
-    if (error || !data.user) {
-      setAuthUser(null)
-      return
+    function validateProfile(expectedId) {
+      if (!active || loginPending.current) return
+      const version = ++authVersion.current
+      clearTimeout(timer)
+      if (expectedId !== authenticatedId.current) {
+        applyAuthUser(null)
+      }
+      profileValidating.current = true
+      setAuthLoading(true)
+      // Keep the auth callback synchronous: SDK calls run outside its lock.
+      timer = setTimeout(async () => {
+        const isCurrent = () => active && version === authVersion.current
+        try {
+          const { data, error } = await supabase.auth.getUser()
+          if (!isCurrent()) return
+          if (error || !data.user || data.user.id !== expectedId) {
+            applyAuthUser(null)
+            return
+          }
+          const { data: profile, error: profileError } = await supabase
+            .from("profiles").select("name, role, status").eq("id", data.user.id).single()
+          if (!isCurrent()) return
+          if (profileError || profile?.status !== "active" ||
+              !["admin", "employee"].includes(profile.role)) {
+            applyAuthUser(null)
+            return
+          }
+          applyAuthUser({
+            id: data.user.id, email: data.user.email, name: profile.name,
+            role: profile.role, type: profile.role, status: profile.status,
+          })
+        } catch {
+          if (isCurrent()) applyAuthUser(null)
+        }
+      }, 0)
     }
-
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("name, role, status")
-      .eq("id", data.user.id)
-      .single()
-
-    if (!active) return
-
-    if (profileError || !profile || profile.status !== "active") {
-      setAuthUser(null)
-      return
-    }
-
-    setAuthUser({
-      id: data.user.id,
-      email: data.user.email,
-      name: profile.name,
-      role: profile.role,
-      type: profile.role,
-      status: profile.status,
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active || (loginPending.current && event !== "SIGNED_OUT")) return
+      if (!session) {
+        authVersion.current += 1
+        clearTimeout(timer)
+        applyAuthUser(null)
+      } else {
+        validateProfile(session.user.id)
+      }
     })
-  } catch (error) {
-    console.error("Erro ao verificar sessão:", error)
-
-    if (active) {
-      setAuthUser(null)
+    // Database role changes don't themselves emit an Auth event. Recheck on focus.
+    const onFocus = () => {
+      try { sanitizeAppCaches(window.localStorage || localStorage, window.sessionStorage) } catch { /* storage unavailable */ }
+      if (authenticatedId.current) validateProfile(authenticatedId.current)
     }
-  } finally {
-    if (active) {
-      setAuthLoading(false)
+    const onStorage = () => {
+      try { sanitizeAppCaches(window.localStorage || localStorage, window.sessionStorage) } catch { /* storage unavailable */ }
     }
-  }
-}
-
-    loadAuthSession()
-
+    window.addEventListener("focus", onFocus)
+    window.addEventListener("storage", onStorage)
     return () => {
       active = false
+      authVersion.current += 1
+      dataVersion.current += 1
+      clearTimeout(timer)
+      subscription.unsubscribe()
+      window.removeEventListener("focus", onFocus)
+      window.removeEventListener("storage", onStorage)
     }
-  }, [])
-  // Indica comunicação com o backend
-  const [
-    ordersLoading,
-    setOrdersLoading,
-  ] = useState(true)
+  }, [applyAuthUser])
+  function isCurrentSession(version) {
+    return version === dataVersion.current && Boolean(authenticatedId.current) &&
+      authUser?.id === authenticatedId.current && authUser?.role === authenticatedRole.current
+  }
 
-  const [
-    backendError,
-    setBackendError,
-  ] = useState(null)
-  const [stockMovements, setStockMovements] = useState([])
+  function captureSession() {
+    const version = dataVersion.current
+    if (profileValidating.current || !isCurrentSession(version)) throw new Error("Sessão alterada. Entre novamente.")
+    return version
+  }
+
   async function loadStockMovements() {
+    const version = captureSession()
     try {
       const movements = await getStockMovements()
 
-      setStockMovements(movements)
+      if (isCurrentSession(version)) setStockMovements(movements)
 
       return movements
     } catch (error) {
@@ -167,137 +199,65 @@ async function loadAuthSession() {
    * INICIALIZAÇÃO DO SISTEMA
    * ========================================
    *
-   * Usuários, estoque e tarefas:
-   * continuam vindo do localStorage.
-   *
-   * Pedidos:
-   * passam a vir do backend Python.
+   * Dados privados só são carregados após validar sessão e perfil.
+   * O cache é separado por usuário; o cache legado não é reutilizado.
    */
 
   useEffect(() => {
-
+    if (!authUser?.id || authUser.status !== "active") return
+    const userId = authUser.id
+    const role = authUser.role
+    const version = dataVersion.current
+    let active = true
+    const isCurrent = () => active && version === dataVersion.current &&
+      userId === authenticatedId.current && role === authenticatedRole.current
     async function initialize() {
-
-      const saved = loadState()
-      // Carrega o estoque diretamente do FastAPI
-      try {
-        const backendProducts = await getProducts()
-
-        setInventory(backendProducts)
-
-        console.log(
-          "Produtos carregados do backend:",
-          backendProducts.length
-        )
-      } catch (error) {
-        console.error(
-          "Erro ao carregar produtos:",
-          error
-        )
-      }
-
-      // ==========================================
-      // HISTÓRICO DE MOVIMENTAÇÕES DE ESTOQUE
-      // ==========================================
-
-      try {
-        await loadStockMovements()
-
-        console.log(
-          "Histórico de movimentações carregado."
-        )
-      } catch (error) {
-        console.error(
-          "Erro ao inicializar histórico:",
-          error
-        )
-      }
-
-      if (saved) {
-
-        setUsers(
-          saved.users ||
-          initialUsers
-        )
-
-        setTasks(
-          saved.tasks ||
-          initialTasks
-        )
-
-        setCurrentUserId(
-          saved.currentUserId ||
-          null
-        )
-      }
-
-      /*
-       * ==================================
-       * BACKEND PYTHON - GET /api/orders
-       * ==================================
-       */
-
-      try {
-
-        setOrdersLoading(true)
-
-        const backendOrders =
-          await getOrders()
-
-        setOrders(
-          backendOrders.map(
-            normalizeOrder
-          )
-        )
-
-        setBackendError(null)
-
-      } catch (error) {
-
-        console.error(
-          "Erro ao carregar pedidos:",
-          error
-        )
-
-        setBackendError(
-          error.message
-        )
-
-        /*
-         * FALLBACK
-         *
-         * Se o Python estiver desligado,
-         * usamos a última cópia local.
-         */
-
-        if (saved?.orders) {
-
-          setOrders(
-            saved.orders.map(
-              normalizeOrder
-            )
-          )
-
-        } else {
-
-          setOrders(
-            initialOrders.map(
-              normalizeOrder
-            )
-          )
-        }
-
-      } finally {
-
+      if (!isCurrent()) return
+      setOrdersLoading(true)
+      setHydrated(false)
+      let saved = null
+      try { saved = loadOperationalCache(localStorage, userId, role) } catch { /* storage unavailable */ }
+      const results = await Promise.allSettled([
+        getProducts(), getOrders(), getStockMovements(),
+      ])
+      if (!isCurrent()) return
+      const failures = results.filter((result) => result.status === "rejected")
+      const denied = failures.find(({ reason }) => [401, 403].includes(reason.status))
+      if (denied) {
+        // Authentication/authorization errors never restore private cached data.
+        setOrders([])
+        setInventory([])
+        setStockMovements([])
+        setUsers([])
+        setTasks([])
+        setBackendError(denied.reason.message)
         setOrdersLoading(false)
-        setHydrated(true)
-
+        return
       }
+      const [productsResult, ordersResult, movementsResult] = results
+      setInventory(productsResult.status === "fulfilled"
+        ? role === "admin" ? productsResult.value : projectProducts(productsResult.value)
+        : saved?.inventory || [])
+      const loadedOrders = ordersResult.status === "fulfilled"
+        ? role === "admin" ? ordersResult.value : projectOrders(ordersResult.value)
+        : saved?.orders || []
+      setOrders(loadedOrders.map(normalizeOrder))
+      setStockMovements(movementsResult.status === "fulfilled" ? movementsResult.value : [])
+      // There is no users-list API yet. Do not present local seed data as
+      // Supabase accounts while administrative provisioning is being added.
+      setUsers([])
+      setTasks(saved?.tasks || initialTasks)
+      setBackendError(failures[0]?.reason.message || null)
+      setOrdersLoading(false)
+      setHydrated(true)
     }
-
-    initialize()
-
-  }, [])
+    // Defer so Strict Mode's setup/cleanup replay doesn't duplicate requests.
+    const timer = setTimeout(initialize, 0)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [authUser?.id, authUser?.role, authUser?.status])
 
 
   /*
@@ -314,29 +274,23 @@ async function loadAuthSession() {
 
   useEffect(() => {
 
-    if (!hydrated) {
+    if (!hydrated || authLoading || !authUser?.id ||
+        authenticatedId.current !== authUser.id || authenticatedRole.current !== authUser.role) {
       return
     }
 
-    localStorage.setItem(
-      STORAGE_KEY,
-
-      JSON.stringify({
-        orders,
-        inventory,
-        users,
-        tasks,
-        currentUserId,
-      })
-    )
+    try {
+      persistOperationalCache(localStorage, authUser.id, authUser.role, { orders, inventory, tasks })
+    } catch { /* storage unavailable */ }
 
   }, [
     orders,
     inventory,
-    users,
     tasks,
-    currentUserId,
     hydrated,
+    authLoading,
+    authUser?.id,
+    authUser?.role,
   ])
 
 
@@ -364,7 +318,13 @@ async function loadAuthSession() {
 
 
   async function saveOrder(data) {
+    const version = captureSession()
     const normalized = normalizeOrder(data)
+    // Operational offline cache is never a source of administrative prices.
+    if (parseCurrency(normalized.total) === undefined ||
+        normalized.items.some(item => parseCurrency(item.unitPrice) === undefined)) {
+      throw new Error("Atualize os dados ou informe preços e total válidos antes de salvar o pedido.")
+    }
 
     const exists = orders.some(
       (order) => order.id === normalized.id
@@ -381,6 +341,7 @@ async function loadAuthSession() {
       }
 
       const finalOrder = normalizeOrder(savedOrder)
+      if (!isCurrentSession(version)) return finalOrder
 
       // 2. Atualiza a lista de pedidos
       setOrders((current) => {
@@ -405,6 +366,7 @@ async function loadAuthSession() {
       try {
 
         const updatedProducts = await getProducts()
+        if (!isCurrentSession(version)) return finalOrder
 
         setInventory(updatedProducts)
 
@@ -424,7 +386,7 @@ async function loadAuthSession() {
         error
       )
 
-      setBackendError(error.message)
+      if (isCurrentSession(version)) setBackendError(error.message)
 
       throw error
     }
@@ -435,10 +397,11 @@ async function loadAuthSession() {
    */
 
   async function deleteOrder(id) {
-
+    const version = captureSession()
     try {
 
       await removeOrder(id)
+      if (!isCurrentSession(version)) return
 
       setOrders(
         (current) =>
@@ -457,7 +420,7 @@ async function loadAuthSession() {
         error
       )
 
-      setBackendError(
+      if (isCurrentSession(version)) setBackendError(
         error.message
       )
 
@@ -471,14 +434,14 @@ async function loadAuthSession() {
    * principalmente, pela tela de
    * separação.
    *
-   * Utiliza o mesmo PUT do pedido.
+   * Utiliza o PATCH exclusivo de separação, enviando somente a ação.
    */
 
   async function updateOrderStatus(
     id,
-    status
+    action
   ) {
-
+    const version = captureSession()
     const existing =
       orders.find(
         (order) =>
@@ -489,33 +452,22 @@ async function loadAuthSession() {
       return
     }
 
-    const updated = {
-      ...existing,
-      status,
-    }
-
     try {
-
-      const saved =
-        await updateOrder(
-          updated
-        )
-
-      const normalized =
-        normalizeOrder(saved)
+      const result = await transitionOrderSeparation(id, action)
+      if (!isCurrentSession(version)) return result
 
       setOrders((current) =>
         current.map(
           (order) =>
             order.id === id
-              ? normalized
+              ? { ...order, status: result.status }
               : order
         )
       )
 
       setBackendError(null)
 
-      return normalized
+      return result
 
     } catch (error) {
 
@@ -524,7 +476,7 @@ async function loadAuthSession() {
         error
       )
 
-      setBackendError(
+      if (isCurrentSession(version)) setBackendError(
         error.message
       )
 
@@ -551,6 +503,11 @@ async function loadAuthSession() {
    */
 
   async function saveProduct(data) {
+    const version = captureSession()
+    const unitPrice = parseCurrency(data.unitPrice)
+    if (unitPrice === undefined) {
+      throw new Error("Atualize os dados ou informe um preço válido antes de salvar o produto.")
+    }
     const product = {
       ...data,
 
@@ -575,7 +532,7 @@ async function loadAuthSession() {
 
       unitPrice: Math.max(
         0,
-        Number(data.unitPrice) || 0
+        unitPrice
       ),
 
       active: data.active !== false,
@@ -588,6 +545,7 @@ async function loadAuthSession() {
     if (exists) {
       try {
         const updatedProduct = await updateProduct(product)
+        if (!isCurrentSession(version)) return updatedProduct
 
         setInventory((current) =>
           current.map((item) =>
@@ -618,6 +576,7 @@ async function loadAuthSession() {
 
     try {
       const savedProduct = await createProduct(product)
+      if (!isCurrentSession(version)) return savedProduct
 
       setInventory((current) => [
         ...current,
@@ -638,8 +597,10 @@ async function loadAuthSession() {
 
 
   async function deleteProduct(id) {
+    const version = captureSession()
     try {
       await removeProduct(id)
+      if (!isCurrentSession(version)) return true
 
       setInventory((current) =>
         current.filter((item) => item.id !== id)
@@ -660,9 +621,11 @@ async function loadAuthSession() {
 
 
   async function changeStock(id, delta) {
+    const version = captureSession()
     try {
       // 1. Envia a movimentação ao FastAPI
       const result = await moveProductStock(id, delta)
+      if (!isCurrentSession(version)) return result
 
       const newQuantity = Number(result.newQuantity)
 
@@ -720,71 +683,93 @@ async function loadAuthSession() {
    */
 
   async function login(email, password, type) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
-      password,
-    })
-
-    if (error || !data.user) {
-      return {
-        ok: false,
-        message: "E-mail ou senha inválidos.",
+    if (loginPending.current) return { ok: false, message: "Login em andamento." }
+    loginPending.current = true
+    const version = ++authVersion.current
+    applyAuthUser(null)
+    setAuthLoading(true)
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      })
+      if (version !== authVersion.current) {
+        return { ok: false, message: "Sessão alterada. Tente entrar novamente." }
       }
-    }
 
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("name, role, status")
-      .eq("id", data.user.id)
-      .single()
+      if (error || !data.user) {
+        return {
+          ok: false,
+          message: "E-mail ou senha inválidos.",
+        }
+      }
 
-    if (profileError || !profile) {
-      await supabase.auth.signOut()
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("name, role, status")
+        .eq("id", data.user.id)
+        .single()
+
+      if (version !== authVersion.current) {
+        return { ok: false, message: "Sessão alterada. Tente entrar novamente." }
+      }
+
+      if (profileError || !profile) {
+        await supabase.auth.signOut()
+
+        return {
+          ok: false,
+          message: "Perfil do usuário não encontrado.",
+        }
+      }
+
+      if (profile.status !== "active" || !["admin", "employee"].includes(profile.role)) {
+        await supabase.auth.signOut()
+
+        return {
+          ok: false,
+          message: "Este usuário está desativado.",
+        }
+      }
+
+      if (type && profile.role !== type) {
+        await supabase.auth.signOut()
+
+        return {
+          ok: false,
+          message: "O perfil selecionado não corresponde a este usuário.",
+        }
+      }
+
+      const user = {
+        id: data.user.id,
+        email: data.user.email,
+        name: profile.name,
+        role: profile.role,
+        type: profile.role,
+        status: profile.status,
+      }
+
+      if (version !== authVersion.current) {
+        return { ok: false, message: "Sessão alterada. Tente entrar novamente." }
+      }
+      applyAuthUser(user)
+      setCurrentUserId(null)
 
       return {
-        ok: false,
-        message: "Perfil do usuário não encontrado.",
+        ok: true,
+        user,
       }
-    }
-
-    if (profile.status !== "active") {
-      await supabase.auth.signOut()
-
-      return {
-        ok: false,
-        message: "Este usuário está desativado.",
-      }
-    }
-
-    if (type && profile.role !== type) {
-      await supabase.auth.signOut()
-
-      return {
-        ok: false,
-        message: "O perfil selecionado não corresponde a este usuário.",
-      }
-    }
-
-    const user = {
-      id: data.user.id,
-      email: data.user.email,
-      name: profile.name,
-      role: profile.role,
-      type: profile.role,
-      status: profile.status,
-    }
-
-    setAuthUser(user)
-    setCurrentUserId(null)
-
-    return {
-      ok: true,
-      user,
+    } finally {
+      loginPending.current = false
+      if (version === authVersion.current) setAuthLoading(false)
     }
   }
 
 
   async function logout() {
+    authVersion.current += 1
+    applyAuthUser(null)
     const { error } = await supabase.auth.signOut()
 
     if (error) {
@@ -792,7 +777,8 @@ async function loadAuthSession() {
       throw new Error("Não foi possível encerrar a sessão.")
     }
 
-    setAuthUser(null)
+    authVersion.current += 1
+    applyAuthUser(null)
     setCurrentUserId(null)
   }
 
