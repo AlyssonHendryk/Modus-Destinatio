@@ -267,6 +267,24 @@ export async function getAdminUsers(page = 1, perPage = 25) {
   }
 }
 
+export async function updateEmployeeStatus(userId, status) {
+  if (!["active", "inactive"].includes(status)) {
+    throw new Error("Status de funcion\u00e1rio inv\u00e1lido.")
+  }
+
+  return request(`/api/admin/users/${encodeURIComponent(userId)}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  })
+}
+
+export async function deleteEmployee(userId) {
+  // request() explicitly returns null for HTTP 204, without JSON parsing.
+  return request(`/api/admin/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  })
+}
+
 // ============================================================
 // PRODUTOS - CONSULTAR ESTOQUE
 // ============================================================

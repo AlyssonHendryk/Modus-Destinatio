@@ -1,9 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { CheckCircle2, ChevronLeft, ChevronRight, Plus, User, X } from "lucide-react"
+import { CheckCircle2, ChevronLeft, ChevronRight, Plus, Trash2, User, X } from "lucide-react"
 import { useApp } from "@/context/AppContext"
-import { createEmployee, getAdminUsers } from "@/services/backend"
+import { createEmployee, deleteEmployee, getAdminUsers, updateEmployeeStatus } from "@/services/backend"
 
 const EMPTY_FORM = { name: "", email: "", password: "" }
 const USERS_PER_PAGE = 25
@@ -25,8 +25,20 @@ export default function UsersManagement() {
   const [total, setTotal] = useState(0)
   const [usersLoading, setUsersLoading] = useState(false)
   const [usersError, setUsersError] = useState("")
+  const [statusOperation, setStatusOperation] = useState(null)
+  const [statusMessage, setStatusMessage] = useState(null)
+  const [statusError, setStatusError] = useState(null)
+  const [deleteCandidate, setDeleteCandidate] = useState(null)
+  const [deleteConfirmation, setDeleteConfirmation] = useState("")
+  const [deleteOperation, setDeleteOperation] = useState(null)
+  const [deleteError, setDeleteError] = useState(null)
+  const [deleteMessage, setDeleteMessage] = useState(null)
   const submissionPending = useRef(false)
+  const statusPending = useRef(false)
+  const deletePending = useRef(false)
   const directoryRequest = useRef(0)
+  const statusRequest = useRef(0)
+  const deleteRequest = useRef(0)
   const authenticatedIdentity = useRef({ id: null, type: null })
 
   useEffect(() => {
@@ -53,9 +65,7 @@ export default function UsersManagement() {
     } catch (requestError) {
       if (requestId !== directoryRequest.current || authenticatedIdentity.current.id !== userId ||
           authenticatedIdentity.current.type !== "admin") return false
-      setUsers([])
       setDirectoryOwnerId(userId)
-      setTotal(0)
       setUsersError(requestError?.message || "Não foi possível carregar os usuários.")
       return false
     } finally {
@@ -66,6 +76,10 @@ export default function UsersManagement() {
   useEffect(() => {
     if (userType !== "admin") {
       directoryRequest.current += 1
+      statusRequest.current += 1
+      deleteRequest.current += 1
+      statusPending.current = false
+      deletePending.current = false
       return undefined
     }
 
@@ -75,6 +89,10 @@ export default function UsersManagement() {
       // Ignore a response begun by a previous user, role or component instance.
       clearTimeout(timer)
       directoryRequest.current += 1
+      statusRequest.current += 1
+      deleteRequest.current += 1
+      statusPending.current = false
+      deletePending.current = false
     }
   }, [userId, userType, loadUsers])
 
@@ -126,11 +144,118 @@ export default function UsersManagement() {
     }
   }
 
+  async function changeEmployeeStatus(employee) {
+    if (statusPending.current || userType !== "admin" || !userId ||
+        authenticatedIdentity.current.id !== userId || authenticatedIdentity.current.type !== "admin") return
+
+    const nextStatus = employee.status === "active" ? "inactive" : "active"
+    const action = nextStatus === "inactive" ? "desativar" : "reativar"
+    const confirmation = nextStatus === "inactive"
+      ? `Desativar ${employee.name}? O funcion\u00e1rio perder\u00e1 acesso ao sistema.`
+      : `Reativar ${employee.name}? O funcion\u00e1rio voltar\u00e1 a acessar o sistema.`
+    if (!window.confirm(confirmation)) return
+
+    const requestId = ++statusRequest.current
+    statusPending.current = true
+    setStatusOperation({ id: employee.id, ownerId: userId })
+    setStatusError(null)
+    setStatusMessage(null)
+    try {
+      await updateEmployeeStatus(employee.id, nextStatus)
+      if (requestId !== statusRequest.current || authenticatedIdentity.current.id !== userId ||
+          authenticatedIdentity.current.type !== "admin") return
+      const refreshed = await loadUsers(page)
+      if (refreshed && requestId === statusRequest.current && authenticatedIdentity.current.id === userId &&
+          authenticatedIdentity.current.type === "admin") {
+        setStatusMessage({ ownerId: userId, text: `Funcion\u00e1rio ${action === "desativar" ? "desativado" : "reativado"} com sucesso.` })
+      }
+    } catch (requestError) {
+      if (requestId !== statusRequest.current || authenticatedIdentity.current.id !== userId ||
+          authenticatedIdentity.current.type !== "admin") return
+      setStatusError({ ownerId: userId, text: requestError?.message || "N\u00e3o foi poss\u00edvel atualizar o status do funcion\u00e1rio." })
+    } finally {
+      if (requestId === statusRequest.current) {
+        statusPending.current = false
+        setStatusOperation(null)
+      }
+    }
+  }
+
+  function openDeleteConfirmation(employee) {
+    if (deletePending.current || statusPending.current || userType !== "admin" ||
+        employee.role !== "employee" || employee.status !== "inactive") return
+    setDeleteCandidate({ id: employee.id, name: employee.name, ownerId: userId })
+    setDeleteConfirmation("")
+    setDeleteError(null)
+  }
+
+  function closeDeleteConfirmation() {
+    if (deletePending.current) return
+    setDeleteCandidate(null)
+    setDeleteConfirmation("")
+    setDeleteError(null)
+  }
+
+  async function confirmEmployeeDeletion(event) {
+    event.preventDefault()
+    const candidate = deleteCandidate
+    if (!candidate || deletePending.current || userType !== "admin" || !userId ||
+        candidate.ownerId !== userId || authenticatedIdentity.current.id !== userId ||
+        authenticatedIdentity.current.type !== "admin") return
+    if (deleteConfirmation !== "EXCLUIR") {
+      setDeleteError({ ownerId: userId, text: "Digite EXCLUIR para confirmar a exclusão permanente." })
+      return
+    }
+
+    const requestId = ++deleteRequest.current
+    deletePending.current = true
+    setDeleteOperation({ id: candidate.id, ownerId: userId })
+    setDeleteError(null)
+    setDeleteMessage(null)
+    try {
+      await deleteEmployee(candidate.id)
+      if (requestId !== deleteRequest.current || authenticatedIdentity.current.id !== userId ||
+          authenticatedIdentity.current.type !== "admin") return
+      // Avoid an empty stale page after deleting its last confirmed record.
+      const requestedPage = page > 1 && users.length === 1 ? page - 1 : page
+      const refreshed = await loadUsers(requestedPage)
+      if (refreshed && requestId === deleteRequest.current && authenticatedIdentity.current.id === userId &&
+          authenticatedIdentity.current.type === "admin") {
+        setDeleteCandidate(null)
+        setDeleteConfirmation("")
+        setDeleteMessage({ ownerId: userId, text: "Funcionário excluído permanentemente." })
+      }
+    } catch (requestError) {
+      if (requestId !== deleteRequest.current || authenticatedIdentity.current.id !== userId ||
+          authenticatedIdentity.current.type !== "admin") return
+      const uncertain = [502, 503].includes(requestError?.status)
+      const fallback = "Não foi possível excluir o funcionário."
+      setDeleteError({
+        ownerId: userId,
+        text: uncertain
+          ? `${requestError?.message || fallback} O resultado da exclusão pode ser incerto. Atualize a lista antes de tentar novamente.`
+          : requestError?.message || fallback,
+      })
+    } finally {
+      if (requestId === deleteRequest.current) {
+        deletePending.current = false
+        setDeleteOperation(null)
+      }
+    }
+  }
+
   if (userType !== "admin") return null
 
   const directoryIsCurrent = directoryOwnerId === userId
   const formIsCurrent = formOwnerId === userId
   const creationIsCurrent = createdEmployee?.ownerId === userId
+  const statusMessageIsCurrent = statusMessage?.ownerId === userId
+  const statusErrorIsCurrent = statusError?.ownerId === userId
+  const statusOperationIsCurrent = statusOperation?.ownerId === userId
+  const deleteCandidateIsCurrent = deleteCandidate?.ownerId === userId
+  const deleteErrorIsCurrent = deleteError?.ownerId === userId
+  const deleteMessageIsCurrent = deleteMessage?.ownerId === userId
+  const deleteOperationIsCurrent = deleteOperation?.ownerId === userId
   const visibleTotal = directoryIsCurrent ? total : 0
   const totalPages = Math.max(1, Math.ceil(visibleTotal / perPage))
 
@@ -172,25 +297,65 @@ export default function UsersManagement() {
         </div>
       )}
 
+      {deleteCandidateIsCurrent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="delete-employee-title">
+          <form onSubmit={confirmEmployeeDeletion} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h4 id="delete-employee-title" className="text-lg font-semibold text-gray-900">Excluir funcionário permanentemente</h4>
+            <p className="mt-2 text-sm text-gray-700">Você está prestes a excluir permanentemente <strong>{deleteCandidate.name}</strong>. Esta ação não pode ser desfeita.</p>
+            <label className="mt-4 block text-sm font-medium text-gray-800" htmlFor="delete-confirmation">Digite <strong>EXCLUIR</strong> para confirmar</label>
+            <input id="delete-confirmation" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)}
+              disabled={deleteOperationIsCurrent} autoComplete="off" className="mt-2 w-full rounded-lg border p-2 text-gray-900 disabled:bg-gray-100" />
+            {deleteErrorIsCurrent && <p className="mt-3 text-sm text-red-600" role="alert">{deleteError.text}</p>}
+            <div className="mt-5 flex justify-end gap-3">
+              {deleteErrorIsCurrent && <button type="button" onClick={() => loadUsers(page)} disabled={deleteOperationIsCurrent} className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50">Atualizar lista</button>}
+              <button type="button" onClick={closeDeleteConfirmation} disabled={deleteOperationIsCurrent} className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50">Cancelar</button>
+              <button type="submit" disabled={deleteOperationIsCurrent} className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm text-white disabled:opacity-50">
+                <Trash2 className="h-4 w-4" />{deleteOperationIsCurrent ? "Excluindo..." : "Excluir permanentemente"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead><tr className="bg-gray-50 border-y">
-            {['Nome', 'E-mail', 'Perfil', 'Status'].map((heading) => (
+            {['Nome', 'E-mail', 'Perfil', 'Status', 'Ações'].map((heading) => (
               <th key={heading} className="text-left p-4 text-xs text-gray-500 uppercase">{heading}</th>
             ))}
           </tr></thead>
           <tbody>
-            {(usersLoading || !directoryIsCurrent) && <tr><td colSpan="4" className="p-6 text-center text-sm text-gray-500">Carregando usuários...</td></tr>}
-            {!usersLoading && directoryIsCurrent && usersError && <tr><td colSpan="4" className="p-6 text-center text-sm text-red-600">
+            {(usersLoading || !directoryIsCurrent) && <tr><td colSpan="5" className="p-6 text-center text-sm text-gray-500">Carregando usuários...</td></tr>}
+            {!usersLoading && directoryIsCurrent && usersError && <tr><td colSpan="5" className="p-6 text-center text-sm text-red-600">
               <p>{usersError}</p><button onClick={() => loadUsers(page)} className="mt-2 text-purple-700 underline">Tentar novamente</button>
             </td></tr>}
-            {!usersLoading && directoryIsCurrent && !usersError && users.length === 0 && <tr><td colSpan="4" className="p-6 text-center text-sm text-gray-500">Nenhum usuário encontrado.</td></tr>}
+            {!usersLoading && directoryIsCurrent && !usersError && users.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-sm text-gray-500">Nenhum usuário encontrado.</td></tr>}
             {!usersLoading && directoryIsCurrent && !usersError && users.map((user) => (
               <tr key={user.id} className="border-b last:border-0">
                 <td className="p-4 font-medium text-gray-900">{user.name}</td>
                 <td className="p-4 text-gray-700">{user.email}</td>
                 <td className="p-4"><span className={user.role === "admin" ? "text-purple-700" : "text-orange-700"}>{user.role === "admin" ? "Administrador" : "Funcionário"}</span></td>
                 <td className="p-4"><span className={user.status === "active" ? "text-green-600" : "text-gray-500"}>{user.status === "active" ? "Ativo" : "Inativo"}</span></td>
+                <td className="p-4">
+                  {user.role === "employee" && (
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => changeEmployeeStatus(user)}
+                        disabled={statusOperationIsCurrent || deleteOperationIsCurrent || usersLoading}
+                        aria-label={`${user.status === "active" ? "Desativar" : "Reativar"} ${user.name}`}
+                        className={`rounded-lg px-3 py-1.5 text-sm disabled:opacity-50 ${user.status === "active" ? "border border-red-200 text-red-700" : "border border-green-200 text-green-700"}`}>
+                        {statusOperationIsCurrent && statusOperation.id === user.id ? "Atualizando..." : user.status === "active" ? "Desativar" : "Reativar"}
+                      </button>
+                      {user.status === "inactive" && (
+                        <button type="button" onClick={() => openDeleteConfirmation(user)}
+                          disabled={statusOperationIsCurrent || deleteOperationIsCurrent || usersLoading}
+                          aria-label={`Excluir permanentemente ${user.name}`}
+                          className="flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-sm text-white disabled:opacity-50">
+                          <Trash2 className="h-4 w-4" />{deleteOperationIsCurrent && deleteOperation.id === user.id ? "Excluindo..." : "Excluir"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -208,7 +373,11 @@ export default function UsersManagement() {
         </div>
       </div>
 
-      <p className="px-6 pb-6 text-sm text-gray-500"><User className="inline w-4 h-4 mr-1" />Edição, desativação, redefinição de senha e exclusão ainda não estão disponíveis.</p>
+      {statusMessageIsCurrent && <p className="mx-6 mb-4 text-sm text-green-700" role="status">{statusMessage.text}</p>}
+      {statusErrorIsCurrent && <p className="mx-6 mb-4 text-sm text-red-600" role="alert">{statusError.text}</p>}
+      {deleteMessageIsCurrent && <p className="mx-6 mb-4 text-sm text-green-700" role="status">{deleteMessage.text}</p>}
+      {deleteErrorIsCurrent && !deleteCandidateIsCurrent && <p className="mx-6 mb-4 text-sm text-red-600" role="alert">{deleteError.text} <button onClick={() => loadUsers(page)} className="underline">Atualizar lista</button></p>}
+      <p className="px-6 pb-6 text-sm text-gray-500"><User className="inline w-4 h-4 mr-1" />Edição e redefinição de senha ainda não estão disponíveis.</p>
     </div>
   )
 }

@@ -53,6 +53,7 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.set_profile()
 
     def set_profile(self, role="employee", status="active"):
+        self.result.side_effect = None
         self.result.return_value = SimpleNamespace(data=[{
             "id": self.user_id, "role": role, "status": status,
         }])
@@ -82,7 +83,7 @@ class ApiAuthenticationTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 401)
                     self.assertEqual(response.headers["www-authenticate"], "Bearer")
                 count += 1
-        self.assertEqual(count, 13)
+        self.assertEqual(count, 15)
         self.profile_client.assert_not_called()
         self.assertEqual(self.profile_client.mock_calls, [])
 
@@ -627,6 +628,207 @@ class ApiAuthenticationTests(unittest.TestCase):
         response = self.client.post("/api/admin/users", json=payload)
         self.assertEqual(response.status_code, 401)
         self.profile_client.assert_not_called()
+
+    def status_request(self, user_id, payload=None, token=None):
+        return self.client.patch(
+            f"/api/admin/users/{user_id}/status",
+            json={"status": "inactive"} if payload is None else payload,
+            headers={"Authorization": "Bearer " + (token or self.token())},
+        )
+
+    def prepare_employee_status_change(self, current_status="active", target_id=None):
+        self.set_profile("admin")
+        target_id = target_id or str(UUID(int=42))
+        target = {
+            "id": target_id, "name": "Funcion\u00e1rio de teste", "role": "employee",
+            "status": current_status, "created_at": "must-not-leak",
+        }
+        self.result.side_effect = [
+            SimpleNamespace(data=[{"id": self.user_id, "role": "admin", "status": "active"}]),
+            SimpleNamespace(data=[target]),
+        ]
+        self.query.update.return_value.eq.return_value.execute.return_value = SimpleNamespace(data=[{
+            **target, "status": "inactive", "internal": "must-not-leak",
+        }])
+        return target_id
+
+    def test_admin_can_deactivate_and_reactivate_an_employee(self):
+        target_id = self.prepare_employee_status_change()
+        response = self.status_request(target_id, {"status": "inactive"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "id": target_id, "name": "Funcion\u00e1rio de teste", "role": "employee", "status": "inactive",
+        })
+        self.query.update.assert_called_once_with({"status": "inactive"})
+        self.query.update.return_value.eq.assert_called_once_with("id", target_id)
+        self.assertNotIn("must-not-leak", response.text)
+
+        target_id = self.prepare_employee_status_change(current_status="inactive")
+        self.query.update.return_value.eq.return_value.execute.return_value = SimpleNamespace(data=[{
+            "id": target_id, "name": "Funcion\u00e1rio de teste", "role": "employee", "status": "active",
+        }])
+        response = self.status_request(target_id, {"status": "active"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "active")
+
+    def test_status_change_requires_admin_before_target_lookup_or_write(self):
+        target_id = str(UUID(int=42))
+        self.set_profile("employee")
+        response = self.status_request(target_id)
+        self.assertEqual(response.status_code, 403)
+        self.query.update.assert_not_called()
+
+        self.profile_client.reset_mock(return_value=True, side_effect=True)
+        response = self.client.patch(f"/api/admin/users/{target_id}/status", json={"status": "inactive"})
+        self.assertEqual(response.status_code, 401)
+        self.profile_client.assert_not_called()
+
+    def test_status_change_rejects_admin_targets_and_invalid_input(self):
+        target_id = str(UUID(int=42))
+        self.set_profile("admin")
+        self.result.side_effect = [
+            SimpleNamespace(data=[{"id": self.user_id, "role": "admin", "status": "active"}]),
+            SimpleNamespace(data=[{"id": target_id, "name": "Admin", "role": "admin", "status": "active"}]),
+        ]
+        response = self.status_request(target_id)
+        self.assertEqual(response.status_code, 403)
+        self.query.update.assert_not_called()
+
+        for user_id, payload in [
+            ("not-a-uuid", {"status": "inactive"}),
+            (str(UUID(int=42)), {"status": "disabled"}),
+            (str(UUID(int=42)), {"status": "inactive", "role": "admin"}),
+            (str(UUID(int=42)), {}),
+        ]:
+            self.set_profile("admin")
+            response = self.status_request(user_id, payload)
+            with self.subTest(user_id=user_id, payload=payload):
+                self.assertEqual(response.status_code, 422)
+        self.query.update.assert_not_called()
+
+    def test_status_change_returns_404_for_unknown_employee_and_sanitizes_failures(self):
+        target_id = str(UUID(int=42))
+        self.set_profile("admin")
+        self.result.side_effect = [
+            SimpleNamespace(data=[{"id": self.user_id, "role": "admin", "status": "active"}]),
+            SimpleNamespace(data=[]),
+        ]
+        response = self.status_request(target_id)
+        self.assertEqual(response.status_code, 404)
+        self.query.update.assert_not_called()
+
+        self.prepare_employee_status_change()
+        self.query.update.return_value.eq.return_value.execute.side_effect = RuntimeError("raw database detail")
+        with self.assertLogs("admin_users", level="ERROR") as logs:
+            response = self.status_request(target_id)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"detail": "N\u00e3o foi poss\u00edvel atualizar o status do funcion\u00e1rio."})
+        self.assertEqual(logs.output, ["ERROR:admin_users:employee_status_update_failed"])
+        self.assertNotIn("raw database detail", response.text)
+
+    def test_inactive_employee_is_blocked_with_a_valid_jwt_and_reactivation_restores_access(self):
+        self.set_profile("employee", "inactive")
+        self.assertEqual(self.request(self.token()).status_code, 403)
+        self.set_profile("employee", "active")
+        self.assertEqual(self.request(self.token()).status_code, 200)
+
+    def delete_employee_request(self, user_id, token=None):
+        return self.client.delete(
+            f"/api/admin/users/{user_id}",
+            headers={"Authorization": "Bearer " + (token or self.token())},
+        )
+
+    def prepare_employee_deletion(self, status="inactive", target_id=None, confirmation_rows=None):
+        self.set_profile("admin")
+        target_id = target_id or str(UUID(int=43))
+        target = {
+            "id": target_id, "name": "Funcion\u00e1rio inativo", "role": "employee", "status": status,
+        }
+        self.result.side_effect = [
+            SimpleNamespace(data=[{"id": self.user_id, "role": "admin", "status": "active"}]),
+            SimpleNamespace(data=[target]),
+            SimpleNamespace(data=[] if confirmation_rows is None else confirmation_rows),
+        ]
+        return target_id
+
+    def test_admin_permanently_deletes_only_an_inactive_employee(self):
+        target_id = self.prepare_employee_deletion()
+        response = self.delete_employee_request(target_id)
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.content, b"")
+        self.profile_client.auth.admin.delete_user.assert_called_once_with(target_id)
+        self.query.delete.assert_not_called()
+
+        # Once the cascading profile deletion is visible, a still-valid JWT can
+        # no longer satisfy require_active_user.
+        self.result.side_effect = None
+        self.result.return_value = SimpleNamespace(data=[])
+        self.assertEqual(self.request(self.token()).status_code, 403)
+
+    def test_employee_deletion_rejects_active_and_administrator_targets(self):
+        target_id = self.prepare_employee_deletion(status="active")
+        response = self.delete_employee_request(target_id)
+        self.assertEqual(response.status_code, 409)
+        self.profile_client.auth.admin.delete_user.assert_not_called()
+
+        self.set_profile("admin")
+        self.result.side_effect = [
+            SimpleNamespace(data=[{"id": self.user_id, "role": "admin", "status": "active"}]),
+            SimpleNamespace(data=[{"id": self.user_id, "name": "Admin", "role": "admin", "status": "active"}]),
+        ]
+        response = self.delete_employee_request(self.user_id)
+        self.assertEqual(response.status_code, 403)
+        self.profile_client.auth.admin.delete_user.assert_not_called()
+
+    def test_employee_deletion_requires_an_admin_and_valid_existing_uuid(self):
+        target_id = str(UUID(int=43))
+        self.set_profile("employee")
+        response = self.delete_employee_request(target_id)
+        self.assertEqual(response.status_code, 403)
+        self.profile_client.auth.admin.delete_user.assert_not_called()
+
+        self.profile_client.reset_mock(return_value=True, side_effect=True)
+        response = self.client.delete(f"/api/admin/users/{target_id}")
+        self.assertEqual(response.status_code, 401)
+        self.profile_client.assert_not_called()
+
+        self.query = self.profile_client.schema.return_value.table.return_value
+        self.result = self.query.select.return_value.eq.return_value.limit.return_value.execute
+        self.set_profile("admin")
+        response = self.delete_employee_request("not-a-uuid")
+        self.assertEqual(response.status_code, 422)
+        self.profile_client.auth.admin.delete_user.assert_not_called()
+
+        self.set_profile("admin")
+        self.result.side_effect = [
+            SimpleNamespace(data=[{"id": self.user_id, "role": "admin", "status": "active"}]),
+            SimpleNamespace(data=[]),
+        ]
+        response = self.delete_employee_request(target_id)
+        self.assertEqual(response.status_code, 404)
+        self.profile_client.auth.admin.delete_user.assert_not_called()
+
+    def test_employee_deletion_fails_closed_for_unknown_outcome_or_missing_confirmation(self):
+        target_id = self.prepare_employee_deletion()
+        self.profile_client.auth.admin.delete_user.side_effect = RuntimeError("raw auth timeout")
+        with self.assertLogs("admin_users", level="ERROR") as logs:
+            response = self.delete_employee_request(target_id)
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json(), {"detail": "N\u00e3o foi poss\u00edvel excluir o funcion\u00e1rio."})
+        self.assertEqual(logs.output, ["ERROR:admin_users:employee_deletion_outcome_unknown"])
+        self.assertNotIn("raw auth timeout", response.text)
+
+        self.profile_client.auth.admin.delete_user.reset_mock()
+        self.profile_client.auth.admin.delete_user.side_effect = None
+        target_id = self.prepare_employee_deletion(confirmation_rows=[{
+            "id": target_id, "name": "Funcion\u00e1rio inativo", "role": "employee", "status": "inactive",
+        }])
+        with self.assertLogs("admin_users", level="ERROR") as confirmation_logs:
+            response = self.delete_employee_request(target_id)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"detail": "N\u00e3o foi poss\u00edvel confirmar a exclus\u00e3o do funcion\u00e1rio."})
+        self.assertEqual(confirmation_logs.output, ["ERROR:admin_users:employee_deletion_confirmation_failed"])
+        self.profile_client.auth.admin.delete_user.assert_called_once_with(target_id)
 
     def test_employee_creation_rejects_forbidden_and_invalid_input_without_echoing_password(self):
         invalid_payloads = [

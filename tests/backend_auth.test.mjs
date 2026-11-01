@@ -151,6 +151,75 @@ test('administrative directory propagates backend denial without retrying', asyn
   assert.equal(calls, 1)
 })
 
+test('employee status update sends only an allowed status with the current Bearer token', async () => {
+  session = { access_token: token }
+  globalThis.fetch = async (url, options) => {
+    assert.ok(url.endsWith('/api/admin/users/6f76db2f-33db-44ea-ae50-eec7ea8e0660/status'))
+    assert.equal(options.method, 'PATCH')
+    assert.equal(options.headers.Authorization, `Bearer ${token}`)
+    assert.deepEqual(JSON.parse(options.body), { status: 'inactive' })
+    return new Response(JSON.stringify({
+      id: '6f76db2f-33db-44ea-ae50-eec7ea8e0660', name: 'Employee Test',
+      role: 'employee', status: 'inactive', internal: 'not displayed by the component',
+    }), { status: 200 })
+  }
+  const result = await backend.updateEmployeeStatus('6f76db2f-33db-44ea-ae50-eec7ea8e0660', 'inactive')
+  assert.equal(result.status, 'inactive')
+  assert.deepEqual(session, { access_token: token })
+})
+
+test('employee status update rejects invalid statuses and propagates backend errors without retrying', async t => {
+  let calls = 0
+  globalThis.fetch = async () => { calls++; throw new Error('Unexpected fetch') }
+  await assert.rejects(backend.updateEmployeeStatus('test-user', 'disabled'), /Status de funcionário inválido/)
+  assert.equal(calls, 0)
+
+  t.mock.method(console, 'error', () => {})
+  session = { access_token: token }
+  for (const status of [401, 403, 404, 422, 503]) {
+    calls = 0
+    globalThis.fetch = async () => {
+      calls++
+      return new Response(JSON.stringify({ detail: 'Atualização indisponível.' }), { status })
+    }
+    await assert.rejects(
+      backend.updateEmployeeStatus('test-user', 'active'),
+      error => error.status === status && error.message === 'Atualização indisponível.',
+    )
+    assert.equal(calls, 1)
+  }
+})
+
+test('employee deletion sends Bearer DELETE and handles the empty 204 response', async () => {
+  session = { access_token: token }
+  globalThis.fetch = async (url, options) => {
+    assert.ok(url.endsWith('/api/admin/users/6f76db2f-33db-44ea-ae50-eec7ea8e0660'))
+    assert.equal(options.method, 'DELETE')
+    assert.equal(options.headers.Authorization, `Bearer ${token}`)
+    assert.equal(options.body, undefined)
+    return new Response(null, { status: 204 })
+  }
+  assert.equal(await backend.deleteEmployee('6f76db2f-33db-44ea-ae50-eec7ea8e0660'), null)
+  assert.deepEqual(session, { access_token: token })
+})
+
+test('employee deletion propagates backend errors without retrying', async t => {
+  t.mock.method(console, 'error', () => {})
+  session = { access_token: token }
+  for (const status of [401, 403, 404, 409, 422, 502, 503]) {
+    let calls = 0
+    globalThis.fetch = async () => {
+      calls++
+      return new Response(JSON.stringify({ detail: 'Exclusão indisponível.' }), { status })
+    }
+    await assert.rejects(
+      backend.deleteEmployee('test-user'),
+      error => error.status === status && error.message === 'Exclusão indisponível.',
+    )
+    assert.equal(calls, 1)
+  }
+})
+
 test('order reads preserve operational fields and omit absent/invalid financial fields', async () => {
   session = { access_token: token }
   for (const fields of [{}, { total: null, unitPrice: null },

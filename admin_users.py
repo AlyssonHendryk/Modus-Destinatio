@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -96,6 +96,21 @@ class AdminUsersPage(BaseModel):
     page: int
     per_page: int
     total: int
+
+
+class EmployeeStatusUpdate(BaseModel):
+    """Strict administrative status change; roles are never client-controlled."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    status: Literal["active", "inactive"]
+
+
+class EmployeeStatusRead(BaseModel):
+    """Operational result of an employee status change."""
+    model_config = ConfigDict(extra="forbid")
+    id: UUID
+    name: str
+    role: Literal["employee"]
+    status: Literal["active", "inactive"]
 
 
 router = APIRouter(prefix="/api/admin", route_class=SafeValidationRoute,
@@ -240,6 +255,126 @@ def list_admin_users(
     start = (page - 1) * per_page
     return AdminUsersPage(users=records[start:start + per_page], page=page,
                           per_page=per_page, total=len(records))
+
+
+@router.patch("/users/{user_id}/status", response_model=EmployeeStatusRead)
+def update_employee_status(
+    user_id: UUID,
+    body: EmployeeStatusUpdate,
+    request: Request,
+    actor: AuthenticatedUser = Depends(require_admin),
+):
+    """Activate or deactivate an existing employee profile without touching Auth."""
+    target_id = str(user_id)
+    client = request.app.state.profile_client
+
+    try:
+        rows = profile_rows(client, target_id)
+    except Exception:
+        logger.error("employee_status_lookup_failed")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel consultar o funcion\u00e1rio.") from None
+
+    if not rows:
+        raise HTTPException(404, "Funcion\u00e1rio n\u00e3o encontrado.")
+    if len(rows) != 1 or not isinstance(rows[0], dict):
+        logger.error("employee_status_lookup_invalid")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel consultar o funcion\u00e1rio.")
+
+    profile = rows[0]
+    # The role is resolved from the protected database profile, never the URL,
+    # request body or JWT. This also blocks an administrator changing itself.
+    if profile.get("id") != target_id or profile.get("role") != "employee":
+        raise HTTPException(403, "Esta opera\u00e7\u00e3o s\u00f3 \u00e9 permitida para funcion\u00e1rios.")
+    if not isinstance(profile.get("name"), str) or not profile["name"]:
+        logger.error("employee_status_lookup_invalid")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel consultar o funcion\u00e1rio.")
+
+    try:
+        updated = (client.schema("public").table("profiles")
+                   .update({"status": body.status}).eq("id", target_id).execute().data)
+    except Exception:
+        logger.error("employee_status_update_failed")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel atualizar o status do funcion\u00e1rio.") from None
+
+    if not isinstance(updated, list) or len(updated) != 1 or not isinstance(updated[0], dict):
+        logger.error("employee_status_update_invalid")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel atualizar o status do funcion\u00e1rio.")
+    result = updated[0]
+    if (
+        result.get("id") != target_id
+        or result.get("name") != profile["name"]
+        or result.get("role") != "employee"
+        or result.get("status") != body.status
+    ):
+        logger.error("employee_status_update_invalid")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel atualizar o status do funcion\u00e1rio.")
+
+    # The actor dependency only exists for authorization; it cannot affect the
+    # administrator's Supabase session.
+    del actor
+    return EmployeeStatusRead(
+        id=result["id"], name=result["name"], role=result["role"], status=result["status"]
+    )
+
+
+@router.delete("/users/{user_id}", status_code=204)
+def delete_inactive_employee(
+    user_id: UUID,
+    request: Request,
+    actor: AuthenticatedUser = Depends(require_admin),
+):
+    """Permanently delete a confirmed inactive employee through Supabase Auth.
+
+    The Auth deletion is intentionally the only mutation: the database FK
+    removes its matching profile. Do not recreate either record if the remote
+    outcome cannot be confirmed.
+    """
+    target_id = str(user_id)
+    client = request.app.state.profile_client
+
+    try:
+        rows = profile_rows(client, target_id)
+    except Exception:
+        logger.error("employee_deletion_lookup_failed")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel consultar o funcion\u00e1rio.") from None
+
+    if not rows:
+        raise HTTPException(404, "Funcion\u00e1rio n\u00e3o encontrado.")
+    if len(rows) != 1 or not isinstance(rows[0], dict):
+        logger.error("employee_deletion_lookup_invalid")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel consultar o funcion\u00e1rio.")
+
+    profile = rows[0]
+    # Role comes exclusively from the protected profile lookup. Since the actor
+    # is an admin, this rejects an attempt to delete itself as well.
+    if profile.get("id") != target_id or profile.get("role") != "employee":
+        raise HTTPException(403, "Esta opera\u00e7\u00e3o s\u00f3 \u00e9 permitida para funcion\u00e1rios inativos.")
+    if profile.get("status") == "active":
+        raise HTTPException(409, "Desative o funcion\u00e1rio antes de exclu\u00ed-lo.")
+    if profile.get("status") != "inactive":
+        logger.error("employee_deletion_lookup_invalid")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel consultar o funcion\u00e1rio.")
+
+    try:
+        client.auth.admin.delete_user(target_id)
+    except Exception:
+        # A timeout may conceal a remote commit. Never recreate Auth or profile
+        # records; a later administrative reconciliation must determine state.
+        logger.error("employee_deletion_outcome_unknown")
+        raise HTTPException(502, "N\u00e3o foi poss\u00edvel excluir o funcion\u00e1rio.") from None
+
+    try:
+        remaining = profile_rows(client, target_id)
+    except Exception:
+        logger.error("employee_deletion_confirmation_failed")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel confirmar a exclus\u00e3o do funcion\u00e1rio.") from None
+    if remaining:
+        logger.error("employee_deletion_confirmation_failed")
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel confirmar a exclus\u00e3o do funcion\u00e1rio.")
+
+    # The actor dependency authorizes this request only; its session is never changed.
+    del actor
+    return Response(status_code=204)
 
 
 @router.post("/users", response_model=EmployeeCreated, status_code=201)
