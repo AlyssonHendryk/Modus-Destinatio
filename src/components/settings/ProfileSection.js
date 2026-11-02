@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import {
   Mail,
   Phone,
@@ -10,49 +10,49 @@ import {
   X
 } from "lucide-react"
 
-export default function ProfileSection({ currentUser, setCurrentUser }) {
-  // Controle para saber se o usuário está editando ou apenas visualizando
+export default function ProfileSection({ currentUser, onSaveName }) {
   const [isEditing, setIsEditing] = useState(false)
-  
-  // Estados locais para controlar os inputs do formulário temporariamente
-  const [formData, setFormData] = useState({
-    name: currentUser?.name || "",
-    email: currentUser?.email || "",
-    phone: currentUser?.phone || ""
-  })
+  const [name, setName] = useState(currentUser?.name || "")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState(false)
+  const pending = useRef(false)
 
-  // Ativa o modo de edição carregando os dados atuais do usuário
   const startEditing = () => {
-    setFormData({
-      name: currentUser?.name || "",
-      email: currentUser?.email || "",
-      phone: currentUser?.phone || ""
-    })
+    setName(currentUser?.name || "")
+    setError("")
+    setSuccess(false)
     setIsEditing(true)
   }
 
-  // Cancela as alterações e fecha o formulário
   const cancelEditing = () => {
+    if (pending.current) return
+    setError("")
     setIsEditing(false)
   }
 
-  // Salva os dados de verdade enviando para o estado global (page.js)
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault()
-    
-    if (!formData.name.trim()) {
-      alert("O nome não pode ficar vazio!")
+    if (pending.current) return
+    const normalized = name.trim()
+    if (!normalized || Array.from(normalized).length > 120) {
+      setError("Informe um nome entre 1 e 120 caracteres.")
       return
     }
-
-    setCurrentUser({
-      ...currentUser,
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone
-    })
-    
-    setIsEditing(false)
+    pending.current = true
+    setSaving(true)
+    setError("")
+    setSuccess(false)
+    try {
+      await onSaveName(normalized)
+      setIsEditing(false)
+      setSuccess(true)
+    } catch (saveError) {
+      setError(saveError?.message || "N\u00e3o foi poss\u00edvel salvar o nome. Tente novamente.")
+    } finally {
+      pending.current = false
+      setSaving(false)
+    }
   }
 
   const primeiraLetra = currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : "U"
@@ -94,16 +94,22 @@ export default function ProfileSection({ currentUser, setCurrentUser }) {
           </div>
         </div>
 
+        {error && <p role="alert" className="mb-4 text-sm text-red-600">{error}</p>}
+        {success && <p role="status" className="mb-4 text-sm text-green-700">Nome atualizado com sucesso.</p>}
         {/* Condicional: Se estiver editando mostra os Inputs, senão mostra os cards informativos */}
         {isEditing ? (
-          <form onSubmit={handleSave} className="space-y-4">
+          <form onSubmit={handleSave} aria-busy={saving} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1">Nome Completo</label>
+                <label htmlFor="profile-name" className="block text-xs font-semibold text-gray-500 mb-1">Nome Completo</label>
                 <input
                   type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  id="profile-name"
+                  required
+                  maxLength={120}
+                  disabled={saving}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
@@ -112,8 +118,8 @@ export default function ProfileSection({ currentUser, setCurrentUser }) {
                 <label className="block text-xs font-semibold text-gray-500 mb-1">E-mail</label>
                 <input
                   type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  readOnly
+                  value={currentUser?.email || ""}
                   className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
@@ -122,8 +128,8 @@ export default function ProfileSection({ currentUser, setCurrentUser }) {
                 <label className="block text-xs font-semibold text-gray-500 mb-1">Telefone</label>
                 <input
                   type="text"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  readOnly
+                  value={currentUser?.phone || ""}
                   className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
@@ -133,15 +139,17 @@ export default function ProfileSection({ currentUser, setCurrentUser }) {
               <button
                 type="button"
                 onClick={cancelEditing}
+                disabled={saving}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-all cursor-pointer"
               >
                 <X className="w-4 h-4" /> Cancelar
               </button>
               <button
                 type="submit"
+                disabled={saving}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 rounded-xl transition-all shadow-md cursor-pointer"
               >
-                <Save className="w-4 h-4" /> Salvar Alterações
+                <Save className="w-4 h-4" /> {saving ? "Salvando..." : "Salvar Alterações"}
               </button>
             </div>
           </form>

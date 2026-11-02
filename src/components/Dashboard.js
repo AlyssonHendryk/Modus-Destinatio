@@ -15,6 +15,7 @@ import TasksPanel from "./dashboard/TasksPanel"
 import InventoryTable from "./dashboard/InventoryTable"
 import AnalyticsCharts from "./dashboard/AnalyticsCharts"
 import StockMovementHistory from "./dashboard/StockMovementHistory"
+import ActivityHistory from "./dashboard/ActivityHistory"
 
 // Componentes de Pedidos
 import { OrdersHeader } from "./Orders/OrdersHeader"
@@ -26,6 +27,8 @@ import OrderModal from "./Orders/OrderModal"
 import OrderSeparationHeader from "./separation/OrderSeparationHeader"
 import OrderSeparationStats from "./separation/OrderSeparationStats"
 import OrderSeparationGrid from "./separation/OrderSeparationGrid"
+import OrderSeparationHistory from "./separation/OrderSeparationHistory"
+import { splitSeparationOrders } from "@/utils/orderSeparationPresentation"
 
 export default function Dashboard({ initialTab = "dashboard" }) {
   const router = useRouter()
@@ -88,7 +91,11 @@ export default function Dashboard({ initialTab = "dashboard" }) {
   // FILTRAGEM DE PEDIDOS PARA SEPARAÇÃO
   // ============================================================
 
-  const separationOrders = filteredOrders.filter((order) =>
+  const activeSeparationOrders = orders.filter((order) =>
+    order.status === "waiting" || order.status === "separating"
+  )
+
+  const separationOrders = activeSeparationOrders.filter((order) =>
     separationFilter === "all"
       ? true
       : order.status === separationFilter
@@ -105,14 +112,17 @@ export default function Dashboard({ initialTab = "dashboard" }) {
   }
 
   function openEdit(order) {
-    if (!isAdmin) return
+    if (!isAdmin || order.status === "completed") return
     setEditingOrder(order)
     setIsModalOpen(true)
   }
 
-  function handleSaveOrder(order) {
-    if (!isAdmin) return
-    saveOrder(order)
+  async function handleSaveOrder(order) {
+    if (!isAdmin) throw new Error("Apenas administradores podem editar pedidos.")
+    if (editingOrder && orders.find(item => item.id === editingOrder.id)?.status === "completed") {
+      throw new Error("Pedidos concluídos não podem ser editados.")
+    }
+    await saveOrder(order)
     setIsModalOpen(false)
     setEditingOrder(null)
   }
@@ -157,13 +167,13 @@ export default function Dashboard({ initialTab = "dashboard" }) {
         onTabChange={setActiveTab}
       />
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
         <TopBar
           search={search}
           onSearchChange={setSearch}
         />
 
-        <main className="flex-1 overflow-y-auto p-8">
+        <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-8">
           {/* ==================================================
               DASHBOARD PRINCIPAL
           ================================================== */}
@@ -242,7 +252,7 @@ export default function Dashboard({ initialTab = "dashboard" }) {
 
               <InventoryTable search={search} />
 
-              <StockMovementHistory />
+
             </div>
           )}
 
@@ -252,16 +262,10 @@ export default function Dashboard({ initialTab = "dashboard" }) {
 
           {activeTab === "separar" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full">
-              <OrderSeparationHeader
-                pendingCount={
-                  orders.filter(
-                    (order) => order.status === "waiting"
-                  ).length
-                }
-              />
+              <OrderSeparationHeader pendingCount={activeSeparationOrders.filter((order) => order.status === "waiting").length} />
 
               <OrderSeparationStats
-                orders={orders}
+                orders={activeSeparationOrders}
                 activeFilter={separationFilter}
                 onFilterChange={setSeparationFilter}
               />
@@ -270,6 +274,21 @@ export default function Dashboard({ initialTab = "dashboard" }) {
                 orders={separationOrders}
                 onStatusChange={updateOrderStatus}
               />
+
+
+            </div>
+          )}
+          {activeTab === "historico" && (
+            <div className="mx-auto w-full min-w-0 max-w-[1600px] space-y-6">
+              <header>
+                <h1 className="text-3xl font-bold text-gray-900">Histórico</h1>
+                <p className="mt-1 text-gray-500">Consulte as movimentações de estoque e os pedidos históricos carregados.</p>
+              </header>
+              <StockMovementHistory />
+              <OrderSeparationHistory orders={splitSeparationOrders(orders).history} />
+              {!authLoading && currentUser?.role === "admin" && currentUser?.status === "active" && (
+                <ActivityHistory key={currentUser.id} user={currentUser} />
+              )}
             </div>
           )}
         </main>

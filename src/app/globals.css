@@ -12,26 +12,76 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
 
+.form-control {
+  border: 1px solid #d1d5db;
+  background-color: #ffffff;
+}
 
-/* Tema escuro controlado por SystemPreferences */
+:where(input, select, textarea)::placeholder {
+  color: #6b7280;
+  opacity: 1;
+}
+
+:where(input, select, textarea):focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+
+:where(input, select, textarea):disabled {
+  cursor: not-allowed;
+}
+
+/* Tema escuro aplicado pelo AppProvider após confirmar a identidade. */
 .modus-dark body { background: #0f172a; color: #e5e7eb; }
-.modus-dark .bg-white { background-color: #111827 !important; }
-.modus-dark .bg-gray-50 { background-color: #0f172a !important; }
-.modus-dark .text-gray-900 { color: #f9fafb !important; }
-.modus-dark .text-gray-800, .modus-dark .text-gray-700 { color: #e5e7eb !important; }
-.modus-dark .text-gray-600, .modus-dark .text-gray-500 { color: #9ca3af !important; }
-.modus-dark .border-gray-100, .modus-dark .border-gray-200, .modus-dark .border-gray-300 { border-color: #374151 !important; }
-.modus-dark input, .modus-dark select { background-color: #1f2937 !important; color: #f9fafb !important; }
+.modus-dark .bg-white { background-color: #111827; }
+.modus-dark .bg-gray-50 { background-color: #0f172a; }
+.modus-dark .bg-gray-100 { background-color: #1f2937; }
+.modus-dark .text-gray-900 { color: #f9fafb; }
+.modus-dark .text-gray-800, .modus-dark .text-gray-700 { color: #e5e7eb; }
+.modus-dark .text-gray-600, .modus-dark .text-gray-500 { color: #9ca3af; }
+.modus-dark .border-gray-100, .modus-dark .border-gray-200, .modus-dark .border-gray-300 { border-color: #374151; }
+.modus-dark :where(input, select, textarea) { background-color: #1f2937; color: #f9fafb; }
+.modus-dark :where(input, select, textarea)::placeholder { color: #9ca3af; }
+.modus-dark :where(input, select, textarea):disabled { background-color: #374151; color: #d1d5db; }
+.modus-dark .form-control { border-color: #4b5563; }
+
+/* Estados claros do Tailwind precisam de uma superfície escura equivalente. */
+.modus-dark .hover\:bg-gray-50:hover,
+.modus-dark .dark-hover-surface:hover { background-color: #1f2937; }
+.modus-dark .hover\:bg-gray-100:hover,
+.modus-dark .hover\:bg-gray-200:hover { background-color: #374151; }
+.modus-dark .hover\:bg-blue-50:hover { background-color: #172554; }
+.modus-dark .hover\:bg-red-50:hover { background-color: #450a0a; }
+.modus-dark .hover\:bg-green-50:hover { background-color: #052e16; }
+.modus-dark .hover\:bg-purple-50:hover { background-color: #2e1065; }
+
+/* Blocos informativos claros, inclusive permissões, mantêm contraste no tema escuro. */
+.modus-dark .bg-green-50 { background-color: #052e16; }
+.modus-dark .border-green-200 { border-color: #166534; }
+.modus-dark .text-green-700 { color: #86efac; }
+.modus-dark .text-green-900 { color: #bbf7d0; }
+.modus-dark .bg-orange-50 { background-color: #431407; }
+.modus-dark .border-orange-200 { border-color: #9a3412; }
+.modus-dark .text-orange-700 { color: #fdba74; }
+.modus-dark .bg-red-50 { background-color: #450a0a; }
+.modus-dark .border-red-200 { border-color: #991b1b; }
+.modus-dark .text-red-700 { color: #fca5a5; }
+.modus-dark .bg-purple-50 { background-color: #2e1065; }
+.modus-dark .border-purple-200 { border-color: #6b21a8; }
+.modus-dark .text-purple-700 { color: #c4b5fd; }
+.modus-dark .bg-amber-50 { background-color: #451a03; }
+.modus-dark .border-amber-200 { border-color: #92400e; }
+.modus-dark .text-amber-700 { color: #fde68a; }
+.modus-dark .settings-permission-item { background-color: #052e16; border-color: #166534; }
+.modus-dark .settings-permission-item .text-gray-700 { color: #dcfce7; }
+
+/* Superfícies translúcidas usadas na tabela de pedidos não podem voltar a ser claras. */
+.modus-dark .orders-table-header,
+.modus-dark .orders-table-footer { background-color: #1f2937; }
+.modus-dark .orders-table-details { background-color: #0f172a; }

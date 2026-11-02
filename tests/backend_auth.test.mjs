@@ -338,3 +338,18 @@ test('administrative product create/update contracts preserve numeric prices inc
     }
   }
 })
+
+
+test('own profile service sends only name with Bearer and propagates API failures', async () => {
+  session = { access_token: token }
+  globalThis.fetch = async (url, options) => {
+    assert.ok(url.endsWith('/api/profile'))
+    assert.equal(options.method, 'PATCH')
+    assert.equal(options.headers.Authorization, `Bearer ${token}`)
+    assert.deepEqual(JSON.parse(options.body), { name: 'Updated Name' })
+    return new Response(JSON.stringify({ id: 'A', name: 'Updated Name' }), { status: 200 })
+  }
+  assert.deepEqual(await backend.updateProfileName('Updated Name'), { id: 'A', name: 'Updated Name' })
+  globalThis.fetch = async () => new Response(JSON.stringify({ detail: 'Save failed' }), { status: 503 })
+  await assert.rejects(backend.updateProfileName('Name'), error => error.status === 503 && error.message === 'Save failed')
+})

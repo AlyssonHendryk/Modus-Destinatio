@@ -1,4 +1,5 @@
 import os
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +10,7 @@ from supabase import create_client, Client
 from api_auth import AuthenticatedUser, require_active_user, require_admin
 from postgrest.exceptions import APIError
 from admin_users import router as admin_users_router
+from activity_logs import derive_cursor_key, router as activity_logs_router
 
 
 # ============================================================
@@ -35,6 +37,7 @@ app = FastAPI(
     title="Modus Destinatio - API"
 )
 app.state.profile_client = supabase
+app.state.activity_cursor_key = derive_cursor_key(SUPABASE_KEY)
 private_api = APIRouter(dependencies=[Depends(require_active_user)])
 
 
@@ -64,6 +67,50 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 class SeparationAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: Literal["start", "confirm"]
+
+
+class ProfileNameUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=120, strict=True)
+
+
+class ProfileNameResponse(BaseModel):
+    id: str
+    name: str
+
+
+def audit_parameters(user: AuthenticatedUser):
+    """Identity comes from the verified dependency, never from the payload."""
+    return {"p_actor_id": user.id, "p_request_id": str(uuid4())}
+
+
+def raise_audit_permission_error(error):
+    """Preserve authorization failures when the RPC rechecks the profile."""
+    if isinstance(error, APIError) and str(error.code) == "42501":
+        raise HTTPException(403, "Perfil não autorizado para esta operação.") from None
+
+
+@private_api.patch("/api/profile", response_model=ProfileNameResponse)
+def update_own_profile(payload: ProfileNameUpdate, user: AuthenticatedUser = Depends(require_active_user)):
+    try:
+        response = (
+            supabase.rpc("audit_update_own_name", {
+                **audit_parameters(user), "p_name": payload.name,
+            })
+            .execute()
+        )
+        rows = response.data
+        if isinstance(rows, list) and len(rows) == 0:
+            raise HTTPException(403, "Perfil ativo não encontrado para atualização.")
+        if (not isinstance(rows, list) or len(rows) != 1 or
+                rows[0].get("id") != user.id or rows[0].get("name") != payload.name):
+            raise HTTPException(503, "Não foi possível confirmar a atualização do nome.")
+        return ProfileNameResponse(id=user.id, name=rows[0]["name"])
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise_audit_permission_error(error)
+        raise HTTPException(503, "Não foi possível atualizar o nome. Tente novamente.") from None
 
 
 class SeparationRpcResult(BaseModel):
@@ -285,7 +332,7 @@ def get_orders(user: AuthenticatedUser = Depends(require_active_user)):
     dependencies=[Depends(require_admin)],
 )
 
-def create_order(order: Order):
+def create_order(order: Order, user: AuthenticatedUser = Depends(require_admin)):
     try:
         # Prepara os itens no formato esperado pela função SQL
         items_data = [
@@ -300,8 +347,9 @@ def create_order(order: Order):
 
         # Cria o pedido e movimenta o estoque em uma transação
         supabase.rpc(
-            "create_order_with_customer_and_stock",
+            "audit_create_order",
             {
+                **audit_parameters(user),
                 "p_order_id": order.id,
                 "p_supplier": order.supplier,
                 "p_customer": order.customer,
@@ -331,6 +379,7 @@ def create_order(order: Order):
         raise
 
     except Exception as error:
+        raise_audit_permission_error(error)
         error_message = str(error)
 
         print(
@@ -375,7 +424,7 @@ def create_order(order: Order):
     dependencies=[Depends(require_admin)],
 )
 
-def update_order(order_id: str, updated_order: Order):
+def update_order(order_id: str, updated_order: Order, user: AuthenticatedUser = Depends(require_admin)):
     try:
         # Garante que o ID do pedido não seja alterado
         if updated_order.id != order_id:
@@ -383,6 +432,13 @@ def update_order(order_id: str, updated_order: Order):
                 status_code=400,
                 detail="O ID do pedido não corresponde ao ID da URL."
             )
+
+        # Keep the early HTTP check; audit_update_order repeats it under lock.
+        persisted_order = get_order_from_database(order_id)
+        if not persisted_order:
+            raise HTTPException(404, "Pedido não encontrado.")
+        if persisted_order.get("status") == "completed":
+            raise HTTPException(409, "Pedidos concluídos não podem ser editados.")
 
         # Prepara os itens para a função PostgreSQL
         items_data = [
@@ -398,8 +454,9 @@ def update_order(order_id: str, updated_order: Order):
         # Atualiza o pedido e ajusta o estoque
         # em uma única transação PostgreSQL
         supabase.rpc(
-            "update_order_with_customer_and_stock",
+            "audit_update_order",
             {
+                **audit_parameters(user),
                 "p_order_id": order_id,
                 "p_supplier": updated_order.supplier,
                 "p_customer": updated_order.customer,
@@ -429,12 +486,16 @@ def update_order(order_id: str, updated_order: Order):
         raise
 
     except Exception as error:
+        raise_audit_permission_error(error)
         error_message = str(error)
 
         print(
             "Erro ao atualizar pedido:",
             error_message,
         )
+
+        if "Pedidos concluídos não podem ser editados." in error_message:
+            raise HTTPException(409, "Pedidos concluídos não podem ser editados.")
 
         if "Pedido não encontrado" in error_message:
             raise HTTPException(
@@ -476,13 +537,17 @@ def update_order(order_id: str, updated_order: Order):
 # ============================================================
 
 @private_api.patch("/api/orders/{order_id}/separation", response_model=SeparationResponse)
-def transition_order_separation(order_id: str, action: SeparationAction):
+def transition_order_separation(
+    order_id: str, action: SeparationAction,
+    user: AuthenticatedUser = Depends(require_active_user),
+):
     try:
         response = supabase.rpc(
-            "transition_order_separation",
-            {"p_order_id": order_id, "p_action": action.action},
+            "audit_transition_order_separation",
+            {**audit_parameters(user), "p_order_id": order_id, "p_action": action.action},
         ).execute()
     except APIError as error:
+        raise_audit_permission_error(error)
         errors = {
             "P2001": (422, "Solicitação de separação inválida."),
             "P2002": (404, "Pedido não encontrado."),
@@ -517,7 +582,7 @@ def transition_order_separation(order_id: str, action: SeparationAction):
     "/api/orders/{order_id}",
     dependencies=[Depends(require_admin)],
 )
-def delete_order(order_id: str):
+def delete_order(order_id: str, user: AuthenticatedUser = Depends(require_admin)):
 
     try:
 
@@ -540,12 +605,9 @@ def delete_order(order_id: str):
 
         (
             supabase
-            .table("orders")
-            .delete()
-            .eq(
-                "id",
-                order_id
-            )
+            .rpc("audit_delete_order", {
+                **audit_parameters(user), "p_order_id": order_id,
+            })
             .execute()
         )
 
@@ -562,7 +624,9 @@ def delete_order(order_id: str):
 
 
     except Exception as error:
-
+        raise_audit_permission_error(error)
+        if isinstance(error, APIError) and str(error.code) == "P0002":
+            raise HTTPException(404, "Pedido não encontrado.") from None
         raise HTTPException(
             status_code=500,
             detail=str(error)
@@ -572,11 +636,15 @@ def delete_order(order_id: str):
 # ============================================================
 
 @private_api.patch("/api/products/{product_id}/stock", dependencies=[Depends(require_admin)])
-def move_product_stock(product_id: str, movement: StockMovement):
+def move_product_stock(
+    product_id: str, movement: StockMovement,
+    user: AuthenticatedUser = Depends(require_admin),
+):
     try:
         response = supabase.rpc(
-            "move_product_stock",
+            "audit_adjust_stock",
             {
+                **audit_parameters(user),
                 "p_product_id": product_id,
                 "p_delta": movement.delta
             }
@@ -590,6 +658,7 @@ def move_product_stock(product_id: str, movement: StockMovement):
         }
 
     except Exception as error:
+        raise_audit_permission_error(error)
         error_message = str(error)
 
         if "Produto não encontrado" in error_message:
@@ -675,7 +744,7 @@ def get_products(user: AuthenticatedUser = Depends(require_active_user)):
 # ============================================================
 
 @private_api.post("/api/products", response_model=Product, status_code=201, dependencies=[Depends(require_admin)])
-def create_product(product: Product):
+def create_product(product: Product, user: AuthenticatedUser = Depends(require_admin)):
     if (
         not product.id.strip()
         or not product.name.strip()
@@ -694,8 +763,9 @@ def create_product(product: Product):
         response = (
             supabase
             .rpc(
-                "create_product_with_stock",
+                "audit_create_product",
                 {
+                    **audit_parameters(user),
                     "p_id": product.id,
                     "p_name": product.name,
                     "p_quantity": product.quantity,
@@ -730,6 +800,7 @@ def create_product(product: Product):
         raise
 
     except Exception as error:
+        raise_audit_permission_error(error)
         # Produto com ID já cadastrado
         if "23505" in str(error):
             raise HTTPException(
@@ -746,7 +817,7 @@ def create_product(product: Product):
 # ============================================================
 
 @private_api.put("/api/products/{product_id}", response_model=Product, dependencies=[Depends(require_admin)])
-def update_product(product_id: str, product: Product):
+def update_product(product_id: str, product: Product, user: AuthenticatedUser = Depends(require_admin)):
     if product.id != product_id:
         raise HTTPException(
             status_code=400,
@@ -782,20 +853,19 @@ def update_product(product_id: str, product: Product):
 
         # A quantidade não pode ser modificada por esta rota.
         # Movimentações de estoque devem utilizar a função
-        # move_product_stock, que registra o histórico.
-        product_data = {
-            "name": product.name,
-            "min": product.min,
-            "max": product.max,
-            "unit_price": product.unitPrice,
-            "active": product.active
-        }
+        # audit_adjust_stock, que registra o histórico.
 
         response = (
             supabase
-            .table("products")
-            .update(product_data)
-            .eq("id", product_id)
+            .rpc("audit_update_product", {
+                **audit_parameters(user),
+                "p_id": product_id,
+                "p_name": product.name,
+                "p_min": product.min,
+                "p_max": product.max,
+                "p_unit_price": product.unitPrice,
+                "p_active": product.active,
+            })
             .execute()
         )
 
@@ -820,7 +890,10 @@ def update_product(product_id: str, product: Product):
     except HTTPException:
         raise
 
-    except Exception:
+    except Exception as error:
+        raise_audit_permission_error(error)
+        if isinstance(error, APIError) and str(error.code) == "P0002":
+            raise HTTPException(404, "Produto não encontrado.") from None
         raise HTTPException(
             status_code=500,
             detail="Erro interno ao atualizar produto."
@@ -831,7 +904,7 @@ def update_product(product_id: str, product: Product):
 # ============================================================
 
 @private_api.delete("/api/products/{product_id}", dependencies=[Depends(require_admin)])
-def delete_product(product_id: str):
+def delete_product(product_id: str, user: AuthenticatedUser = Depends(require_admin)):
     try:
         # Verifica se o produto existe
         existing = (
@@ -868,10 +941,9 @@ def delete_product(product_id: str):
             )
 
         # Solicita a exclusão
-        supabase.table("products") \
-            .delete() \
-            .eq("id", product_id) \
-            .execute()
+        supabase.rpc("audit_delete_product", {
+            **audit_parameters(user), "p_product_id": product_id,
+        }).execute()
 
         return {
             "message": f"Produto {product_id} excluído com sucesso."
@@ -881,6 +953,9 @@ def delete_product(product_id: str):
         raise
 
     except Exception as error:
+        raise_audit_permission_error(error)
+        if isinstance(error, APIError) and str(error.code) == "P0002":
+            raise HTTPException(404, "Produto não encontrado.") from None
         # A chave estrangeira também protege contra
         # vínculos criados entre a consulta e a exclusão.
         error_message = str(error)
@@ -918,6 +993,7 @@ def health():
 
 app.include_router(private_api)
 app.include_router(admin_users_router)
+app.include_router(activity_logs_router)
 
 if __name__ == "__main__":
 

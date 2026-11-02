@@ -273,12 +273,21 @@ export default function UsersManagement() {
 
       {showForm && formIsCurrent && (
         <form onSubmit={submit} className="p-5 bg-gray-50 border-b grid md:grid-cols-4 gap-3">
-          <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}
-            disabled={submitting} placeholder="Nome" autoComplete="name" className="border rounded-lg p-2 text-gray-900 disabled:bg-gray-100" />
-          <input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })}
-            disabled={submitting} type="email" placeholder="E-mail" autoComplete="email" className="border rounded-lg p-2 text-gray-900 disabled:bg-gray-100" />
-          <input value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })}
-            disabled={submitting} type="password" placeholder="Senha inicial" autoComplete="new-password" className="border rounded-lg p-2 text-gray-900 disabled:bg-gray-100" />
+          <div className="space-y-1">
+            <label htmlFor="employee-name" className="block text-xs font-medium text-gray-700">Nome completo</label>
+            <input id="employee-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}
+              disabled={submitting} placeholder="Nome do funcionário" autoComplete="name" className="form-control w-full rounded-lg p-2 text-gray-900" />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="employee-email" className="block text-xs font-medium text-gray-700">E-mail</label>
+            <input id="employee-email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })}
+              disabled={submitting} type="email" placeholder="nome@empresa.com" autoComplete="email" className="form-control w-full rounded-lg p-2 text-gray-900" />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="employee-password" className="block text-xs font-medium text-gray-700">Senha inicial</label>
+            <input id="employee-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })}
+              disabled={submitting} type="password" placeholder="Defina uma senha inicial" autoComplete="new-password" className="form-control w-full rounded-lg p-2 text-gray-900" />
+          </div>
           <div className="flex gap-2">
             <button disabled={submitting} className="flex-1 bg-purple-600 text-white rounded-lg disabled:opacity-60">
               {submitting ? "Cadastrando..." : "Cadastrar funcionário"}

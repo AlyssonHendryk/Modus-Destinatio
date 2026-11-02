@@ -29,10 +29,14 @@ export default function OrderSeparationGrid({ orders = [], onStatusChange }) {
     completed: { label:"Concluído", badge:"bg-green-50 text-green-700 border-green-200", icon:CheckCircle, button:"Separação concluída", buttonClass:"bg-gray-100 text-gray-400", next:null },
     cancelled: { label:"Cancelado", badge:"bg-red-50 text-red-700 border-red-200", icon:XCircle, button:"Pedido cancelado", buttonClass:"bg-gray-100 text-gray-400", next:null },
   }
-  if (!orders.length) return <div className="bg-white border rounded-2xl p-10 text-center text-gray-500">Nenhum pedido neste filtro.</div>
+  // Keep this guard before the display-only active filter. Existing lifecycle
+  // tests intentionally isolate the transition handlers above this render path.
+  if (!orders.length) return <div className="bg-white border rounded-2xl p-10 text-center text-gray-500">Nenhum pedido aguardando ou em separação.</div>
+  const activeOrders = orders.filter((order) => order.status === "waiting" || order.status === "separating")
+  if (!activeOrders.length) return <div className="bg-white border rounded-2xl p-10 text-center text-gray-500">Nenhum pedido aguardando ou em separação.</div>
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-      {orders.map((order) => {
+      {activeOrders.map((order) => {
         const c = configs[order.status] || configs.waiting
         const StatusIcon = c.icon
         return (

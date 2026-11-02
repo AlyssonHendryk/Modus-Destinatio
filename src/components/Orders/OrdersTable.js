@@ -91,7 +91,7 @@ export function OrdersTable({
         <table className="w-full">
 
           <thead>
-            <tr className="border-b bg-gray-50/50">
+            <tr className="orders-table-header border-b bg-gray-50/50">
               {[
                 "Id. Pedido",
                 "Cliente / Origem",
@@ -143,7 +143,7 @@ export function OrdersTable({
                         )
                       }
                     }}
-                    className="border-b hover:bg-gray-50 cursor-pointer"
+                    className="dark-hover-surface border-b hover:bg-gray-50 cursor-pointer"
                   >
 
                     <td className="py-4 px-6 font-medium text-gray-900">
@@ -193,7 +193,7 @@ export function OrdersTable({
                     {isAdmin && <td className="py-4 px-6">
                       <div className="flex gap-2">
 
-                        {!isCancelled && order.stock_applied === true && (
+                        {!isCancelled && order.status !== "completed" && order.stock_applied === true && (
                           <button
                             type="button"
                             onClick={(event) => {
@@ -208,6 +208,10 @@ export function OrdersTable({
                           </button>
                         )}
 
+                        {order.status === "completed" && (
+                          <span className="text-xs text-gray-500 italic">Concluído - edição bloqueada</span>
+                        )}
+
                         {isCancelled && (
                           <span
                             className="text-xs text-gray-400 italic"
@@ -217,7 +221,7 @@ export function OrdersTable({
                           </span>
                         )}
 
-                        {!isCancelled && order.stock_applied !== true && (
+                        {!isCancelled && order.status !== "completed" && order.stock_applied !== true && (
                           <span
                             className="text-xs text-gray-400 italic"
                             title="Pedido antigo sem movimentação de estoque regularizada"
@@ -236,7 +240,7 @@ export function OrdersTable({
                     <tr>
                       <td
                         colSpan={isAdmin ? 7 : 5}
-                        className="bg-gray-50 p-5"
+                        className="orders-table-details bg-gray-50 p-5"
                       >
                         <div className="bg-white border rounded-xl overflow-hidden">
                           <table className="w-full">
@@ -306,7 +310,7 @@ export function OrdersTable({
         </table>
       </div>
 
-      <div className="border-t px-6 py-4 bg-gray-50/30 flex items-center justify-between">
+      <div className="orders-table-footer border-t px-6 py-4 bg-gray-50/30 flex items-center justify-between">
 
         <p className="text-sm text-gray-600">
           Página {currentPage} de {totalPages}

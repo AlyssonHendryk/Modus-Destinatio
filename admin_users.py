@@ -4,13 +4,14 @@ import logging
 import re
 from datetime import datetime
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from postgrest.exceptions import APIError
 from supabase_auth.errors import AuthApiError
 
 from api_auth import AuthenticatedUser, require_admin
@@ -132,6 +133,35 @@ def profile_rows(client, user_id):
     return rows
 
 
+def record_auth_audit(client, rpc_name, parameters, *, required=False, intent=False):
+    """Confirm the scalar log ID; never retry an RPC or an Auth operation here."""
+    try:
+        log_id = client.rpc(rpc_name, parameters).execute().data
+        if type(log_id) is not int or log_id <= 0:
+            raise ValueError("Unconfirmed audit event")
+        return True
+    except Exception as error:
+        logger.error("employee_auth_audit_write_failed")
+        if required:
+            if intent and isinstance(error, APIError):
+                if str(error.code) == "42501":
+                    raise HTTPException(403, "Esta operação exige autorização administrativa.") from None
+                if str(error.code) == "P0002":
+                    raise HTTPException(404, "Funcionário não encontrado.") from None
+                if str(error.code) == "P0001":
+                    raise HTTPException(409, "Desative o funcionário antes de excluí-lo.") from None
+            raise HTTPException(503, "Não foi possível confirmar o registro de auditoria. Reconciliação administrativa necessária.") from None
+        # Preserve the original operation's error response if result logging
+        # also failed. The committed intent remains available for reconciliation.
+        return False
+
+
+def confirmed_auth_rejection(error):
+    """Provider 4xx rejection, excluding timeout; 5xx is not proof of failure."""
+    return (isinstance(error, AuthApiError) and isinstance(error.status, int)
+            and 400 <= error.status < 500 and error.status != 408)
+
+
 def compensate_new_auth_user(client, user_id, actor_id):
     """Delete only this request's confirmed new UUID, with no existing profile.
 
@@ -140,16 +170,20 @@ def compensate_new_auth_user(client, user_id, actor_id):
     """
     if user_id == actor_id:
         logger.error("employee_creation_reconciliation_required")
-        return
+        return "not_attempted"
+    attempted = False
     try:
         if profile_rows(client, user_id):
             logger.error("employee_creation_reconciliation_required")
-            return
+            return "not_attempted"
+        attempted = True
         client.auth.admin.delete_user(user_id)
         logger.warning("employee_creation_compensated")
+        return "succeeded"
     except Exception:
         # Never log SDK exceptions, payloads, UUIDs, emails or Auth responses.
         logger.error("employee_creation_reconciliation_required")
+        return "unknown" if attempted else "not_attempted"
 
 
 def auth_users_by_id(client):
@@ -290,8 +324,21 @@ def update_employee_status(
         raise HTTPException(503, "N\u00e3o foi poss\u00edvel consultar o funcion\u00e1rio.")
 
     try:
-        updated = (client.schema("public").table("profiles")
-                   .update({"status": body.status}).eq("id", target_id).execute().data)
+        updated = client.rpc("audit_update_employee_status", {
+            "p_actor_id": actor.id,
+            "p_request_id": str(uuid4()),
+            "p_user_id": target_id,
+            "p_status": body.status,
+        }).execute().data
+    except APIError as error:
+        logger.error("employee_status_update_failed")
+        if str(error.code) == "P0002":
+            raise HTTPException(404, "Funcion\u00e1rio n\u00e3o encontrado.") from None
+        if str(error.code) == "42501":
+            raise HTTPException(403, "Esta opera\u00e7\u00e3o exige autoriza\u00e7\u00e3o administrativa para alterar um funcion\u00e1rio.") from None
+        if str(error.code) == "22023":
+            raise HTTPException(422, "Status inv\u00e1lido.") from None
+        raise HTTPException(503, "N\u00e3o foi poss\u00edvel atualizar o status do funcion\u00e1rio.") from None
     except Exception:
         logger.error("employee_status_update_failed")
         raise HTTPException(503, "N\u00e3o foi poss\u00edvel atualizar o status do funcion\u00e1rio.") from None
@@ -309,9 +356,6 @@ def update_employee_status(
         logger.error("employee_status_update_invalid")
         raise HTTPException(503, "N\u00e3o foi poss\u00edvel atualizar o status do funcion\u00e1rio.")
 
-    # The actor dependency only exists for authorization; it cannot affect the
-    # administrator's Supabase session.
-    del actor
     return EmployeeStatusRead(
         id=result["id"], name=result["name"], role=result["role"], status=result["status"]
     )
@@ -355,25 +399,43 @@ def delete_inactive_employee(
         logger.error("employee_deletion_lookup_invalid")
         raise HTTPException(503, "N\u00e3o foi poss\u00edvel consultar o funcion\u00e1rio.")
 
+    audit = {"p_actor_id": actor.id, "p_request_id": str(uuid4()), "p_user_id": target_id}
+    record_auth_audit(client, "audit_employee_deletion_requested", audit,
+                      required=True, intent=True)
     try:
         client.auth.admin.delete_user(target_id)
-    except Exception:
+    except Exception as error:
         # A timeout may conceal a remote commit. Never recreate Auth or profile
         # records; a later administrative reconciliation must determine state.
         logger.error("employee_deletion_outcome_unknown")
+        rejected = confirmed_auth_rejection(error)
+        record_auth_audit(client, "audit_employee_deletion_result", {
+            **audit, "p_outcome": "failed" if rejected else "unknown",
+            "p_stage": "auth_delete",
+            "p_reason_code": "auth_rejected" if rejected else "remote_outcome_unknown",
+        })
         raise HTTPException(502, "N\u00e3o foi poss\u00edvel excluir o funcion\u00e1rio.") from None
 
     try:
         remaining = profile_rows(client, target_id)
     except Exception:
         logger.error("employee_deletion_confirmation_failed")
+        record_auth_audit(client, "audit_employee_deletion_result", {
+            **audit, "p_outcome": "unknown", "p_stage": "deletion_confirmation",
+            "p_reason_code": "confirmation_failed",
+        })
         raise HTTPException(503, "N\u00e3o foi poss\u00edvel confirmar a exclus\u00e3o do funcion\u00e1rio.") from None
     if remaining:
         logger.error("employee_deletion_confirmation_failed")
+        record_auth_audit(client, "audit_employee_deletion_result", {
+            **audit, "p_outcome": "unknown", "p_stage": "deletion_confirmation",
+            "p_reason_code": "profile_still_present",
+        })
         raise HTTPException(503, "N\u00e3o foi poss\u00edvel confirmar a exclus\u00e3o do funcion\u00e1rio.")
 
-    # The actor dependency authorizes this request only; its session is never changed.
-    del actor
+    record_auth_audit(client, "audit_employee_deletion_result", {
+        **audit, "p_outcome": "succeeded",
+    }, required=True)
     return Response(status_code=204)
 
 
@@ -381,6 +443,9 @@ def delete_inactive_employee(
 def create_employee(body: EmployeeCreate, request: Request,
                     actor: AuthenticatedUser = Depends(require_admin)):
     client = request.app.state.profile_client
+    audit = {"p_actor_id": actor.id, "p_request_id": str(uuid4())}
+    record_auth_audit(client, "audit_employee_creation_requested", audit,
+                      required=True, intent=True)
     try:
         result = client.auth.admin.create_user({
             "email": body.email, "password": body.password.get_secret_value(),
@@ -388,6 +453,14 @@ def create_employee(body: EmployeeCreate, request: Request,
             "email_confirm": True,
         })
     except AuthApiError as error:
+        rejected = confirmed_auth_rejection(error)
+        reason = {"email_exists": "account_exists", "user_already_exists": "account_exists",
+                  "weak_password": "weak_password"}.get(error.code, "auth_rejected")
+        record_auth_audit(client, "audit_employee_creation_result", {
+            **audit, "p_outcome": "failed" if rejected else "unknown",
+            "p_stage": "auth_create",
+            "p_reason_code": reason if rejected else "remote_outcome_unknown",
+        })
         if error.code in {"email_exists", "user_already_exists"}:
             raise HTTPException(409, "Já existe uma conta com este e-mail.") from None
         if error.code == "weak_password":
@@ -397,6 +470,10 @@ def create_employee(body: EmployeeCreate, request: Request,
     except Exception:
         # A timeout may follow a successful remote commit: don't guess an ID.
         logger.error("employee_creation_auth_outcome_unknown")
+        record_auth_audit(client, "audit_employee_creation_result", {
+            **audit, "p_outcome": "unknown", "p_stage": "auth_create",
+            "p_reason_code": "remote_outcome_unknown",
+        })
         raise HTTPException(502, "Não foi possível criar o funcionário.") from None
 
     try:
@@ -405,16 +482,29 @@ def create_employee(body: EmployeeCreate, request: Request,
             raise ValueError("Unverified new identity")
     except Exception:
         logger.error("employee_creation_reconciliation_required")
+        # An unverified identity must not be associated with an employee UUID.
+        record_auth_audit(client, "audit_employee_creation_result", {
+            **audit, "p_outcome": "unknown", "p_stage": "identity_check",
+            "p_reason_code": "response_unverified",
+        })
         raise HTTPException(502, "Não foi possível confirmar o cadastro do funcionário.") from None
 
     try:
         existing = profile_rows(client, user_id)
     except Exception:
         logger.error("employee_creation_reconciliation_required")
+        record_auth_audit(client, "audit_employee_creation_result", {
+            **audit, "p_user_id": user_id, "p_outcome": "unknown",
+            "p_stage": "profile_lookup", "p_reason_code": "lookup_failed",
+        })
         raise HTTPException(500, "Não foi possível concluir o cadastro do funcionário.") from None
     if existing:
         # Never overwrite or cascade-delete a preexisting profile.
         logger.error("employee_creation_reconciliation_required")
+        record_auth_audit(client, "audit_employee_creation_result", {
+            **audit, "p_user_id": user_id, "p_outcome": "unknown",
+            "p_stage": "profile_lookup", "p_reason_code": "preexisting_profile",
+        })
         raise HTTPException(500, "Não foi possível concluir o cadastro do funcionário.")
 
     profile = {"id": user_id, "name": body.name, "role": "employee", "status": "active"}
@@ -423,7 +513,24 @@ def create_employee(body: EmployeeCreate, request: Request,
         if not isinstance(rows, list) or len(rows) != 1 or any(rows[0].get(key) != value for key, value in profile.items()):
             raise ValueError("Invalid profile creation response")
     except Exception:
-        compensate_new_auth_user(client, user_id, actor.id)
+        compensation = compensate_new_auth_user(client, user_id, actor.id)
+        if compensation == "succeeded":
+            outcome = {"p_outcome": "failed", "p_stage": "profile_insert",
+                       "p_reason_code": "profile_write_failed", "p_compensation_result": "succeeded"}
+        elif compensation == "unknown":
+            outcome = {"p_outcome": "unknown", "p_stage": "compensation",
+                       "p_reason_code": "compensation_unconfirmed", "p_compensation_result": "unknown"}
+        else:
+            outcome = {"p_outcome": "unknown", "p_stage": "profile_insert",
+                       "p_reason_code": "profile_write_outcome_unknown", "p_compensation_result": "not_attempted"}
+        record_auth_audit(client, "audit_employee_creation_result", {
+            **audit, "p_user_id": user_id, **outcome,
+        })
         raise HTTPException(500, "Não foi possível concluir o cadastro do funcionário.") from None
 
+    # Outside the insertion/compensation try: an audit failure must never delete
+    # a successfully provisioned account or automatically repeat Auth Admin.
+    record_auth_audit(client, "audit_employee_creation_result", {
+        **audit, "p_user_id": user_id, "p_outcome": "succeeded",
+    }, required=True)
     return EmployeeCreated(**profile)

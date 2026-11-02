@@ -8,6 +8,8 @@ import vm from 'node:vm'
 const original = await readFile(new URL('../src/context/AppContext.js', import.meta.url), 'utf8')
 const cacheSource = await readFile(new URL('../src/utils/operationalCache.js', import.meta.url), 'utf8')
 const cacheUtils = await import(`data:text/javascript;base64,${Buffer.from(cacheSource).toString('base64')}`)
+const preferencesSource = await readFile(new URL('../src/utils/userPreferences.js', import.meta.url), 'utf8')
+const preferencesUtils = await import(`data:text/javascript;base64,${Buffer.from(preferencesSource).toString('base64')}`)
 const formatterSource = await readFile(new URL('../src/utils/formatters.js', import.meta.url), 'utf8')
 const formatterUtils = await import(`data:text/javascript;base64,${Buffer.from(formatterSource).toString('base64')}`)
 const source = original
@@ -125,7 +127,7 @@ function harness(initialUser = null) {
   const network = Object.fromEntries([
     'getOrders', 'getProducts', 'getStockMovements', 'createOrder', 'updateOrder',
     'removeOrder', 'createProduct', 'updateProduct', 'moveProductStock', 'removeProduct',
-    'transitionOrderSeparation',
+    'transitionOrderSeparation', 'updateProfileName',
   ].map(name => [name, (...args) => {
     calls.push(name)
     requests.push({ name, args })
@@ -138,7 +140,12 @@ function harness(initialUser = null) {
     setItem: (key, val) => cache.set(key, val),
     removeItem: key => cache.delete(key),
   }
+  const classes = new Set()
+  const document = { documentElement: { classList: {
+    toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name) },
+  } } }
   const context = vm.createContext({
+    document,
     ...hooks, ...network, ...cacheUtils, ...formatterUtils, supabase, createContext: () => ({}),
     normalizeOrder: order => order, initialUsers: [], initialTasks: [],
     window: {
@@ -149,6 +156,7 @@ function harness(initialUser = null) {
     setTimeout: fn => { const id = ++timerId; timers.set(id, fn); return id },
     clearTimeout: id => timers.delete(id), console,
   })
+  vm.runInContext(preferencesSource.replace(/export /g, ''), context)
   vm.runInContext(source, context)
   function render() {
     let count = 0
@@ -174,7 +182,7 @@ function harness(initialUser = null) {
   }
   render()
   return {
-    get value() { return value }, calls, requests, cache, profiles, emit, settle,
+    get value() { return value }, calls, requests, cache, profiles, emit, settle, classes,
     setRead(fn) { read = fn },
     replayEffects() {
       for (const slot of slots) if (slot?.setup) { slot.cleanup?.(); slot.cleanup = slot.setup() }
@@ -602,4 +610,176 @@ test('pending initial reads stay invalid after an admin-employee-admin role cycl
   assert.equal(h.value.orders[0].total, 50)
   assert.equal(h.value.inventory[0].id, 'P1')
   assert.equal(h.value.inventory[0].unitPrice, 25)
+})
+
+
+test('preferences preserve rapid changes and immediate saving without an intervening render', async () => {
+  const h = harness('A')
+  await h.settle()
+  h.value.updatePreferences({ theme: 'dark' })
+  h.value.updatePreferences({ notifications: { reports: false } })
+  assert.equal(h.value.persistPreferences(), true)
+  const saved = JSON.parse(h.cache.get(preferencesUtils.preferencesKey('A')))
+  assert.equal(saved.theme, 'dark')
+  assert.equal(saved.notifications.reports, false)
+  await h.settle()
+  assert.equal(h.value.preferences.theme, 'dark')
+  h.replayEffects()
+  assert.equal(h.classes.has('modus-dark'), true)
+  await h.settle()
+  assert.equal(h.classes.has('modus-dark'), true)
+})
+
+test('preferences follow verified identity without mounting Settings and survive logout/relogin', async () => {
+  const h = harness('A')
+  h.cache.set(preferencesUtils.preferencesKey('A'), JSON.stringify({ theme: 'dark' }))
+  h.cache.set(preferencesUtils.preferencesKey('B'), JSON.stringify({ theme: 'light' }))
+  h.profiles.set('A', { name: 'Same', role: 'admin', status: 'active' })
+  h.profiles.set('B', { name: 'Same', role: 'employee', status: 'active' })
+  assert.equal(h.classes.has('modus-dark'), false)
+  await h.settle()
+  assert.equal(h.classes.has('modus-dark'), true)
+  h.emit('SIGNED_IN', 'B')
+  assert.equal(h.classes.has('modus-dark'), false, 'clear previous theme before validation finishes')
+  await h.settle()
+  assert.equal(h.value.preferences.theme, 'light')
+  assert.equal(h.classes.has('modus-dark'), false)
+  h.value.updatePreferences({ theme: 'dark', notifications: { reports: false } })
+  await h.settle()
+  assert.equal(h.value.persistPreferences(), true)
+  assert.equal(JSON.parse(h.cache.get(preferencesUtils.preferencesKey('B'))).notifications.reports, false)
+  assert.equal(JSON.parse(h.cache.get(preferencesUtils.preferencesKey('A'))).theme, 'dark')
+  await h.value.logout()
+  assert.equal(h.classes.has('modus-dark'), false)
+  await h.settle()
+  assert.equal(h.value.preferences.theme, 'light')
+  assert.equal(h.value.persistPreferences(), false)
+  h.emit('SIGNED_IN', 'B')
+  await h.settle()
+  assert.equal(h.classes.has('modus-dark'), true)
+  assert.equal(h.value.preferences.notifications.reports, false)
+})
+
+test('missing preference and ownerless legacy key use defaults without deleting individual values', async () => {
+  const h = harness('A')
+  h.cache.set('modusdestinatio_preferences', JSON.stringify({ theme: 'dark' }))
+  h.cache.set(preferencesUtils.preferencesKey('B'), JSON.stringify({ theme: 'dark' }))
+  await h.settle()
+  assert.equal(h.value.preferences.theme, 'light')
+  assert.equal(h.classes.has('modus-dark'), false)
+  assert.equal(h.cache.has('modusdestinatio_preferences'), false)
+  assert.equal(h.cache.has(preferencesUtils.preferencesKey('B')), true)
+  h.emit('SIGNED_IN', 'B')
+  await h.settle()
+  assert.equal(h.classes.has('modus-dark'), true)
+  const profile = deferred()
+  h.profiles.set('C', profile.promise)
+  h.emit('SIGNED_IN', 'C')
+  await h.settle()
+  assert.equal(h.value.authLoading, true)
+  assert.equal(h.classes.has('modus-dark'), false)
+  profile.resolve({ name: 'C', role: 'employee', status: 'inactive' })
+  await h.settle()
+  assert.equal(h.classes.has('modus-dark'), false)
+})
+
+test('preferences allowlist fields and tolerate corrupt or inaccessible storage', () => {
+  const value = preferencesUtils.normalizePreferences({ theme: 'dark', token: 'secret', password: 'secret',
+    language: 'invalid', notifications: { lowStock: false, reports: 'invalid', token: 'secret' } })
+  assert.deepEqual(Object.keys(value).sort(), ['language', 'notifications', 'theme'])
+  assert.equal(value.language, 'pt')
+  assert.equal(value.notifications.lowStock, false)
+  assert.equal(value.notifications.reports, true)
+  assert.equal('token' in value.notifications, false)
+  const broken = { getItem() { throw Error('blocked') }, removeItem() { throw Error('blocked') }, setItem() { throw Error('blocked') } }
+  assert.equal(preferencesUtils.loadUserPreferences(broken, 'A').theme, 'light')
+  assert.equal(preferencesUtils.saveUserPreferences(broken, 'A', value), false)
+  assert.equal(preferencesUtils.loadUserPreferences({ removeItem() {}, getItem: () => '{' }, 'A').theme, 'light')
+})
+
+
+test('explicit login applies saved theme before returning and reset only changes current user', async () => {
+  const h = harness()
+  await h.settle()
+  h.cache.set(preferencesUtils.preferencesKey('A'), JSON.stringify({ theme: 'dark' }))
+  h.cache.set(preferencesUtils.preferencesKey('B'), JSON.stringify({ theme: 'dark' }))
+  const result = await h.value.login('test@example.test', 'test-password', 'employee')
+  assert.equal(result.ok, true)
+  assert.equal(h.classes.has('modus-dark'), true)
+  await h.settle()
+  h.value.updatePreferences(preferencesUtils.DEFAULT_PREFERENCES)
+  h.value.persistPreferences(preferencesUtils.DEFAULT_PREFERENCES)
+  await h.settle()
+  assert.equal(h.classes.has('modus-dark'), false)
+  assert.equal(JSON.parse(h.cache.get(preferencesUtils.preferencesKey('A'))).theme, 'light')
+  assert.equal(JSON.parse(h.cache.get(preferencesUtils.preferencesKey('B'))).theme, 'dark')
+})
+
+
+test('saveOrder rejects reopening a locally completed order before any update request', async () => {
+  const h = harness('A')
+  h.profiles.set('A', { name: 'Admin', role: 'admin', status: 'active' })
+  h.setRead(async name => name === 'getOrders' ? [{ id: 'O1', status: 'completed', total: 1,
+    items: [{ productId: 'P1', product: 'Product', quantity: 1, unitPrice: 1 }] }] : [])
+  await h.settle()
+  await assert.rejects(h.value.saveOrder({ ...h.value.orders[0], status: 'waiting' }), /concluídos/)
+  assert.equal(h.calls.includes('updateOrder'), false)
+})
+
+
+test('profile name is synced only after API success and survives profile revalidation and login', async () => {
+  const h = harness('A')
+  h.profiles.set('A', { name: 'Old', role: 'employee', status: 'active' })
+  await h.settle()
+  h.value.updatePreferences({ theme: 'dark' })
+  h.value.persistPreferences()
+  await h.settle()
+  const original = h.value.currentUser
+  h.setRead(async (name, value) => {
+    if (name === 'updateProfileName') {
+      h.profiles.set('A', { name: value, role: 'employee', status: 'active' })
+      return { id: 'A', name: value, role: 'admin', status: 'inactive' }
+    }
+    return []
+  })
+  await h.value.saveProfileName('New Name')
+  await h.settle()
+  assert.equal(h.value.currentUser.name, 'New Name')
+  assert.equal(h.value.currentUser.id, original.id)
+  assert.equal(h.value.currentUser.role, 'employee')
+  assert.equal(h.value.currentUser.status, 'active')
+  assert.equal(h.value.currentUser.email, original.email)
+  assert.equal(h.classes.has('modus-dark'), true)
+  const reloaded = harness('A')
+  reloaded.profiles.set('A', h.profiles.get('A'))
+  await reloaded.settle()
+  assert.equal(reloaded.value.currentUser.name, 'New Name')
+  h.focus()
+  await h.settle()
+  assert.equal(h.value.currentUser.name, 'New Name')
+  await h.value.logout()
+  await h.settle()
+  await h.value.login('test@example.test', 'password', 'employee')
+  await h.settle()
+  assert.equal(h.value.currentUser.name, 'New Name')
+  h.setRead(async () => { throw Error('API unavailable') })
+  await assert.rejects(h.value.saveProfileName('Failed'), /API unavailable/)
+  await h.settle()
+  assert.equal(h.value.currentUser.name, 'New Name')
+})
+
+test('late profile save cannot overwrite a different logged-in account', async () => {
+  const h = harness('A')
+  await h.settle()
+  const response = deferred()
+  h.setRead(async name => name === 'updateProfileName' ? response.promise : [])
+  const pending = h.value.saveProfileName('Late')
+  const rejected = assert.rejects(pending)
+  h.emit('SIGNED_IN', 'B')
+  await h.settle()
+  response.resolve({ id: 'A', name: 'Late' })
+  await rejected
+  await h.settle()
+  assert.equal(h.value.currentUser.id, 'B')
+  assert.equal(h.value.currentUser.name, 'B')
 })

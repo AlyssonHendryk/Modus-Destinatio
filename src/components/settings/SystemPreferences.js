@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useApp } from "@/context/AppContext"
+import { DEFAULT_PREFERENCES } from "@/utils/userPreferences"
 import {
   Palette,
   Globe,
@@ -11,84 +13,36 @@ import {
 } from "lucide-react"
 
 export default function SystemPreferences() {
-  const defaultPreferences = {
-    theme: "light",
-    language: "pt",
-    notifications: {
-      lowStock: true,
-      newOrders: true,
-      separation: false,
-      reports: true
-    }
-  }
+  const { preferences, updatePreferences, persistPreferences, currentUser } = useApp()
+  return <PreferencesForm key={currentUser?.id ?? "anonymous"} preferences={preferences}
+    updatePreferences={updatePreferences} persistPreferences={persistPreferences} />
+}
 
-  // Substituído o hook do Context pelo estado local do React
-  const [theme, setTheme] = useState("light")
-  const [language, setLanguage] = useState("pt")
-  const [notifications, setNotifications] = useState({
-    lowStock: true,
-    newOrders: true,
-    separation: false,
-    reports: true
-  })
-
+function PreferencesForm({ preferences, updatePreferences, persistPreferences }) {
+  const { theme, language, notifications } = preferences
   const [saved, setSaved] = useState(false)
-
   useEffect(() => {
-    document.documentElement.classList.toggle("modus-dark", theme === "dark")
-  }, [theme])
+    if (!saved) return
+    const timer = setTimeout(() => setSaved(false), 3000)
+    return () => clearTimeout(timer)
+  }, [saved])
 
-  // Carrega as preferências salvas no navegador ao abrir a página
-  useEffect(() => {
-    const preferences = localStorage.getItem("modusdestinatio_preferences")
-
-    if (preferences) {
-      try {
-        const data = JSON.parse(preferences)
-        setTheme(data.theme || "light")
-        setLanguage(data.language || "pt")
-        setNotifications(data.notifications || defaultPreferences.notifications)
-      } catch {
-        localStorage.removeItem("modusdestinatio_preferences")
-      }
-    }
-  }, [])
+  const setTheme = theme => { updatePreferences({ theme }); setSaved(false) }
+  const setLanguage = language => { updatePreferences({ language }); setSaved(false) }
 
   const handleSave = () => {
-    const preferences = {
-      theme,
-      language,
-      notifications
-    }
-
-    localStorage.setItem(
-      "modusdestinatio_preferences",
-      JSON.stringify(preferences)
-    )
-
-    setSaved(true)
-
-    setTimeout(() => {
-      setSaved(false)
-    }, 3000)
+    setSaved(persistPreferences())
   }
 
   const handleReset = () => {
-    setTheme(defaultPreferences.theme)
-    setLanguage(defaultPreferences.language)
-    setNotifications(defaultPreferences.notifications)
-
-    localStorage.setItem(
-      "modusdestinatio_preferences",
-      JSON.stringify(defaultPreferences)
-    )
+    updatePreferences(DEFAULT_PREFERENCES)
+    persistPreferences(DEFAULT_PREFERENCES)
+    setSaved(false)
   }
 
-  const toggleNotification = (key) => {
-    setNotifications({
-      ...notifications,
-      [key]: !notifications[key]
-    })
+  const toggleNotification = key => {
+    updatePreferences({ notifications: { ...notifications, [key]: !notifications[key] } })
+    setSaved(false)
   }
 
   return (

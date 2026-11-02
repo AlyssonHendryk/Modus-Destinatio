@@ -21,6 +21,7 @@ export default function ConfiguracoesPage() {
   const {
     authLoading,
     currentUser,
+    saveProfileName,
     users,
   } = useApp()
 
@@ -39,12 +40,6 @@ export default function ConfiguracoesPage() {
   // ============================================================
   // ALTERAÇÃO DE PERFIL
   // ============================================================
-
-  function setCurrentUser() {
-    alert(
-      "A edição do perfil será disponibilizada após a integração com o Supabase."
-    )
-  }
 
   // ============================================================
   // ALTERAÇÃO DE SENHA
@@ -105,8 +100,9 @@ export default function ConfiguracoesPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <ProfileSection
+          key={currentUser.id}
           currentUser={currentUser}
-          setCurrentUser={setCurrentUser}
+          onSaveName={saveProfileName}
         />
 
         <SecuritySection

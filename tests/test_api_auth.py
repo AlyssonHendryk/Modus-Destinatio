@@ -48,6 +48,7 @@ class ApiAuthenticationTests(unittest.TestCase):
             key=self.signing_key.public_key()
         )
         self.profile_client.reset_mock(return_value=True, side_effect=True)
+        self.audit_request_ids = set()
         self.query = self.profile_client.schema.return_value.table.return_value
         self.result = self.query.select.return_value.eq.return_value.limit.return_value.execute
         self.set_profile()
@@ -57,6 +58,42 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.result.return_value = SimpleNamespace(data=[{
             "id": self.user_id, "role": role, "status": status,
         }])
+
+    def assert_audit_rpc(self, name, parameters):
+        self.profile_client.rpc.assert_called_once()
+        actual_name, actual = self.profile_client.rpc.call_args.args
+        self.assertEqual(actual_name, name)
+        request_id = actual.get("p_request_id")
+        self.assertEqual(str(UUID(request_id)), request_id)
+        self.assertEqual(UUID(request_id).version, 4)
+        self.assertNotIn(request_id, self.audit_request_ids)
+        self.audit_request_ids.add(request_id)
+        self.assertEqual(actual, {**parameters, "p_actor_id": self.user_id, "p_request_id": request_id})
+
+    def assert_auth_audit(self, operation, outcome, **metadata):
+        rpc_calls = self.profile_client.rpc.call_args_list
+        self.assertEqual(len(rpc_calls), 2)
+        intent_name, intent = rpc_calls[0].args
+        result_name, result = rpc_calls[1].args
+        self.assertEqual(intent_name, f"audit_employee_{operation}_requested")
+        self.assertEqual(result_name, f"audit_employee_{operation}_result")
+        request_id = intent["p_request_id"]
+        self.assertEqual(str(UUID(request_id)), request_id)
+        self.assertEqual(UUID(request_id).version, 4)
+        self.assertNotIn(request_id, self.audit_request_ids)
+        self.audit_request_ids.add(request_id)
+        base = {"p_actor_id": self.user_id, "p_request_id": request_id}
+        if operation == "deletion":
+            base["p_user_id"] = metadata["p_user_id"]
+        self.assertEqual(intent, base)
+        self.assertEqual(result, {**base, "p_outcome": outcome, **metadata})
+        calls = self.profile_client.mock_calls
+        external = "create_user" if operation == "creation" else "delete_user"
+        intent_index = calls.index(call.rpc(intent_name, intent))
+        external_index = next(i for i, item in enumerate(calls) if item[0] == f"auth.admin.{external}")
+        result_index = calls.index(call.rpc(result_name, result))
+        self.assertLess(intent_index, external_index)
+        self.assertLess(external_index, result_index)
 
     def token(self, **overrides):
         claims = {
@@ -83,9 +120,60 @@ class ApiAuthenticationTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 401)
                     self.assertEqual(response.headers["www-authenticate"], "Bearer")
                 count += 1
-        self.assertEqual(count, 15)
+        self.assertEqual(count, 17)
         self.profile_client.assert_not_called()
         self.assertEqual(self.profile_client.mock_calls, [])
+
+    def profile_name_request(self, body):
+        return self.client.patch("/api/profile", json=body,
+            headers={"Authorization": "Bearer " + self.token()})
+
+    def test_both_roles_update_only_their_own_persisted_name(self):
+        for role in ("admin", "employee"):
+            with self.subTest(role=role):
+                self.set_profile(role)
+                self.profile_client.rpc.reset_mock()
+                self.profile_client.rpc.return_value.execute.return_value = SimpleNamespace(data=[{
+                    "id": self.user_id, "name": "Updated Name", "role": role, "status": "active",
+                }])
+                self.query.update.reset_mock()
+                response = self.profile_name_request({"name": "  Updated Name  "})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json(), {"id": self.user_id, "name": "Updated Name"})
+                self.profile_client.schema.assert_called_with("public")
+                self.profile_client.schema.return_value.table.assert_called_with("profiles")
+                self.assert_audit_rpc("audit_update_own_name", {"p_name": "Updated Name"})
+                self.query.update.assert_not_called()
+
+    def test_profile_name_rejects_inactive_and_unauthenticated_users_before_update(self):
+        self.assertEqual(self.client.patch("/api/profile", json={"name": "Name"}).status_code, 401)
+        self.query.update.assert_not_called()
+        self.set_profile(status="inactive")
+        self.assertEqual(self.profile_name_request({"name": "Name"}).status_code, 403)
+        self.query.update.assert_not_called()
+        self.profile_client.rpc.assert_not_called()
+
+    def test_profile_name_rejects_invalid_names_and_all_extra_fields(self):
+        for body in [{}, {"name": ""}, {"name": "   "}, {"name": "x" * 121},
+                     {"name": None}, {"name": 123}, {"name": []}]:
+            with self.subTest(body=body):
+                self.assertEqual(self.profile_name_request(body).status_code, 422)
+        for field in ("id", "role", "status", "email", "phone", "password", "user_id", "p_actor_id", "p_request_id"):
+            with self.subTest(field=field):
+                self.assertEqual(self.profile_name_request({"name": "Name", field: "another-account"}).status_code, 422)
+        self.query.update.assert_not_called()
+
+    def test_profile_name_failure_is_sanitized_and_unconfirmed_update_never_succeeds(self):
+        execute = self.profile_client.rpc.return_value.execute
+        execute.side_effect = RuntimeError("private database detail")
+        response = self.profile_name_request({"name": "Name"})
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("private database detail", response.text)
+        execute.side_effect = None
+        for rows, expected in [([], 403), ([{"id": "another-account", "name": "Name"}], 503),
+                               ([{"id": self.user_id, "name": "Old"}], 503)]:
+            execute.return_value = SimpleNamespace(data=rows)
+            self.assertEqual(self.profile_name_request({"name": "Name"}).status_code, expected)
 
     def test_health_is_public(self):
         self.assertEqual(self.client.get("/api/health").status_code, 200)
@@ -163,8 +251,8 @@ class ApiAuthenticationTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["newQuantity"], 11)
-        self.profile_client.rpc.assert_called_once_with(
-            "move_product_stock", {"p_product_id": "test-product", "p_delta": 1}
+        self.assert_audit_rpc(
+            "audit_adjust_stock", {"p_product_id": "test-product", "p_delta": 1}
         )
 
     def administrative_requests(self):
@@ -241,14 +329,14 @@ class ApiAuthenticationTests(unittest.TestCase):
                 self.result.assert_called_once_with()
                 if method == "POST" and path == "/api/products":
                     self.assertEqual(response.json(), body)
-                    self.profile_client.rpc.assert_called_once_with("create_product_with_stock", {
+                    self.assert_audit_rpc("audit_create_product", {
                         "p_id": body["id"], "p_name": body["name"], "p_quantity": body["quantity"],
                         "p_min": body["min"], "p_max": body["max"],
                         "p_unit_price": body["unitPrice"], "p_active": body["active"],
                     })
                 elif method == "POST":
                     self.assertEqual(response.json(), order_response)
-                    self.profile_client.rpc.assert_called_once_with("create_order_with_customer_and_stock", {
+                    self.assert_audit_rpc("audit_create_order", {
                         "p_order_id": body["id"], "p_supplier": body["supplier"],
                         "p_customer": body["customer"],
                         "p_operation": body["operation"], "p_status": body["status"],
@@ -256,7 +344,7 @@ class ApiAuthenticationTests(unittest.TestCase):
                     })
                 elif method == "PUT" and path.startswith("/api/orders/"):
                     self.assertEqual(response.json(), order_response)
-                    self.profile_client.rpc.assert_called_once_with("update_order_with_customer_and_stock", {
+                    self.assert_audit_rpc("audit_update_order", {
                         "p_order_id": body["id"], "p_supplier": body["supplier"],
                         "p_customer": body["customer"],
                         "p_operation": body["operation"], "p_status": body["status"],
@@ -264,18 +352,55 @@ class ApiAuthenticationTests(unittest.TestCase):
                     })
                 elif method == "PUT":
                     self.assertEqual(response.json(), body)
-                    table.update.assert_called_once_with({
-                        "name": body["name"], "min": body["min"], "max": body["max"],
-                        "unit_price": body["unitPrice"], "active": body["active"],
+                    self.assert_audit_rpc("audit_update_product", {
+                        "p_id": body["id"], "p_name": body["name"], "p_min": body["min"], "p_max": body["max"],
+                        "p_unit_price": body["unitPrice"], "p_active": body["active"],
                     })
                 elif method == "DELETE":
                     self.assertIn("message", response.json())
-                    table.delete.assert_called_once_with()
+                    kind = "product" if "/products/" in path else "order"
+                    self.assert_audit_rpc(f"audit_delete_{kind}", {f"p_{kind}_id": f"test-{kind}"})
+                    table.delete.assert_not_called()
                 else:
                     self.assertEqual(response.json()["newQuantity"], 11)
-                    self.profile_client.rpc.assert_called_once_with(
-                        "move_product_stock", {"p_product_id": "test-product", "p_delta": 1}
+                    self.assert_audit_rpc(
+                        "audit_adjust_stock", {"p_product_id": "test-product", "p_delta": 1}
                     )
+
+    def test_completed_order_rejects_all_put_changes_using_persisted_status(self):
+        self.set_profile("admin")
+        order = self.administrative_requests()[4][2]
+        persisted = {**order, "status": "completed", "stock_applied": True}
+        changes = [
+            {"status": "waiting"}, {"customer": "Other customer"},
+            {"supplier": "Other supplier"}, {"total": 500},
+            {"items": [{**order["items"][0], "quantity": 2}]},
+        ]
+        for change in changes:
+            with self.subTest(change=change), patch("main.get_order_from_database", return_value=persisted):
+                self.profile_client.rpc.reset_mock()
+                response = self.client.put("/api/orders/test-order", json={**order, **change},
+                    headers={"Authorization": "Bearer " + self.token()})
+                self.assertEqual(response.status_code, 409)
+                self.assertIn("conclu", response.json()["detail"])
+                self.profile_client.rpc.assert_not_called()
+
+    def test_noncompleted_order_put_remains_editable_and_missing_order_is_not_updated(self):
+        self.set_profile("admin")
+        order = self.administrative_requests()[4][2]
+        for status in ("waiting", "separating", "shipped"):
+            with self.subTest(status=status), patch("main.get_order_from_database", return_value={**order, "status": status}):
+                self.profile_client.rpc.reset_mock()
+                response = self.client.put("/api/orders/test-order", json=order,
+                    headers={"Authorization": "Bearer " + self.token()})
+                self.assertEqual(response.status_code, 200)
+                self.profile_client.rpc.assert_called_once()
+        with patch("main.get_order_from_database", return_value=None):
+            self.profile_client.rpc.reset_mock()
+            response = self.client.put("/api/orders/test-order", json=order,
+                headers={"Authorization": "Bearer " + self.token()})
+            self.assertEqual(response.status_code, 404)
+            self.profile_client.rpc.assert_not_called()
 
     def test_order_write_keeps_customer_distinct_and_accepts_legacy_null(self):
         self.set_profile("admin")
@@ -292,8 +417,8 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["customer"])
         self.assertEqual(response.json()["supplier"], "Test supplier")
-        self.profile_client.rpc.assert_called_once_with(
-            "create_order_with_customer_and_stock", {
+        self.assert_audit_rpc(
+            "audit_create_order", {
                 "p_order_id": legacy_request["id"],
                 "p_supplier": "Test supplier", "p_customer": None,
                 "p_operation": legacy_request["operation"], "p_status": legacy_request["status"],
@@ -350,7 +475,7 @@ class ApiAuthenticationTests(unittest.TestCase):
                         self.assertEqual(response.json(), {
                             "orderId": "test-order", "status": status, "changed": changed,
                         })
-                        self.profile_client.rpc.assert_called_once_with("transition_order_separation", {
+                        self.assert_audit_rpc("audit_transition_order_separation", {
                             "p_order_id": "test-order", "p_action": action,
                         })
                         self.profile_client.table.assert_not_called()
@@ -637,6 +762,7 @@ class ApiAuthenticationTests(unittest.TestCase):
 
     def prepare_employee_creation(self, role="admin", profile_rows=None):
         self.set_profile(role)
+        self.profile_client.rpc.return_value.execute.return_value = SimpleNamespace(data=1)
         self.new_employee_id = "6f76db2f-33db-44ea-ae50-eec7ea8e0660"
         self.profile_rows = [] if profile_rows is None else profile_rows
         self.result.side_effect = [
@@ -678,6 +804,7 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.profile_client.auth.sign_in_with_password.assert_not_called()
         self.profile_client.auth.sign_up.assert_not_called()
         self.profile_client.auth.set_session.assert_not_called()
+        self.assert_auth_audit("creation", "succeeded", p_user_id=self.new_employee_id)
 
     def test_employee_and_unauthenticated_cannot_provision_users(self):
         payload = self.employee_payload()
@@ -709,7 +836,7 @@ class ApiAuthenticationTests(unittest.TestCase):
             SimpleNamespace(data=[{"id": self.user_id, "role": "admin", "status": "active"}]),
             SimpleNamespace(data=[target]),
         ]
-        self.query.update.return_value.eq.return_value.execute.return_value = SimpleNamespace(data=[{
+        self.profile_client.rpc.return_value.execute.return_value = SimpleNamespace(data=[{
             **target, "status": "inactive", "internal": "must-not-leak",
         }])
         return target_id
@@ -721,17 +848,19 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.json(), {
             "id": target_id, "name": "Funcion\u00e1rio de teste", "role": "employee", "status": "inactive",
         })
-        self.query.update.assert_called_once_with({"status": "inactive"})
-        self.query.update.return_value.eq.assert_called_once_with("id", target_id)
+        self.assert_audit_rpc("audit_update_employee_status", {"p_user_id": target_id, "p_status": "inactive"})
+        self.query.update.assert_not_called()
         self.assertNotIn("must-not-leak", response.text)
 
         target_id = self.prepare_employee_status_change(current_status="inactive")
-        self.query.update.return_value.eq.return_value.execute.return_value = SimpleNamespace(data=[{
+        self.profile_client.rpc.reset_mock()
+        self.profile_client.rpc.return_value.execute.return_value = SimpleNamespace(data=[{
             "id": target_id, "name": "Funcion\u00e1rio de teste", "role": "employee", "status": "active",
         }])
         response = self.status_request(target_id, {"status": "active"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "active")
+        self.assert_audit_rpc("audit_update_employee_status", {"p_user_id": target_id, "p_status": "active"})
 
     def test_status_change_requires_admin_before_target_lookup_or_write(self):
         target_id = str(UUID(int=42))
@@ -780,7 +909,7 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.query.update.assert_not_called()
 
         self.prepare_employee_status_change()
-        self.query.update.return_value.eq.return_value.execute.side_effect = RuntimeError("raw database detail")
+        self.profile_client.rpc.return_value.execute.side_effect = RuntimeError("raw database detail")
         with self.assertLogs("admin_users", level="ERROR") as logs:
             response = self.status_request(target_id)
         self.assertEqual(response.status_code, 503)
@@ -802,6 +931,7 @@ class ApiAuthenticationTests(unittest.TestCase):
 
     def prepare_employee_deletion(self, status="inactive", target_id=None, confirmation_rows=None):
         self.set_profile("admin")
+        self.profile_client.rpc.return_value.execute.return_value = SimpleNamespace(data=1)
         target_id = target_id or str(UUID(int=43))
         target = {
             "id": target_id, "name": "Funcion\u00e1rio inativo", "role": "employee", "status": status,
@@ -820,6 +950,7 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.content, b"")
         self.profile_client.auth.admin.delete_user.assert_called_once_with(target_id)
         self.query.delete.assert_not_called()
+        self.assert_auth_audit("deletion", "succeeded", p_user_id=target_id)
 
         # Once the cascading profile deletion is visible, a still-valid JWT can
         # no longer satisfy require_active_user.
@@ -879,7 +1010,10 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.json(), {"detail": "N\u00e3o foi poss\u00edvel excluir o funcion\u00e1rio."})
         self.assertEqual(logs.output, ["ERROR:admin_users:employee_deletion_outcome_unknown"])
         self.assertNotIn("raw auth timeout", response.text)
+        self.assert_auth_audit("deletion", "unknown", p_user_id=target_id,
+                               p_stage="auth_delete", p_reason_code="remote_outcome_unknown")
 
+        self.profile_client.reset_mock()
         self.profile_client.auth.admin.delete_user.reset_mock()
         self.profile_client.auth.admin.delete_user.side_effect = None
         target_id = self.prepare_employee_deletion(confirmation_rows=[{
@@ -891,6 +1025,8 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.json(), {"detail": "N\u00e3o foi poss\u00edvel confirmar a exclus\u00e3o do funcion\u00e1rio."})
         self.assertEqual(confirmation_logs.output, ["ERROR:admin_users:employee_deletion_confirmation_failed"])
         self.profile_client.auth.admin.delete_user.assert_called_once_with(target_id)
+        self.assert_auth_audit("deletion", "unknown", p_user_id=target_id,
+                               p_stage="deletion_confirmation", p_reason_code="profile_still_present")
 
     def test_employee_creation_rejects_forbidden_and_invalid_input_without_echoing_password(self):
         invalid_payloads = [
@@ -898,6 +1034,8 @@ class ApiAuthenticationTests(unittest.TestCase):
             self.employee_payload(status="active"),
             self.employee_payload(id=self.new_employee_id if hasattr(self, "new_employee_id") else self.user_id),
             self.employee_payload(extra="not allowed"),
+            self.employee_payload(p_actor_id=self.user_id),
+            self.employee_payload(p_request_id=str(UUID(int=99))),
             self.employee_payload(name="   "),
             self.employee_payload(name="x" * 121),
             self.employee_payload(email="invalid-email"),
@@ -931,6 +1069,7 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.query.insert.assert_not_called()
         self.profile_client.auth.admin.delete_user.assert_not_called()
         self.assertNotIn("provider detail", response.text)
+        self.assert_auth_audit("creation", "failed", p_stage="auth_create", p_reason_code="account_exists")
 
     def test_auth_failure_is_sanitized_without_profile_write(self):
         self.prepare_employee_creation()
@@ -943,6 +1082,7 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.query.insert.assert_not_called()
         self.profile_client.auth.admin.delete_user.assert_not_called()
         self.assertNotIn("raw auth failure", response.text)
+        self.assert_auth_audit("creation", "unknown", p_stage="auth_create", p_reason_code="remote_outcome_unknown")
 
     def test_profile_failure_compensates_only_the_proven_new_auth_user(self):
         self.prepare_employee_creation()
@@ -958,6 +1098,9 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.json(), {"detail": "Não foi possível concluir o cadastro do funcionário."})
         self.profile_client.auth.admin.delete_user.assert_called_once_with(self.new_employee_id)
         self.assertEqual(logs.output, ["WARNING:admin_users:employee_creation_compensated"])
+        self.assert_auth_audit("creation", "failed", p_user_id=self.new_employee_id,
+                               p_stage="profile_insert", p_reason_code="profile_write_failed",
+                               p_compensation_result="succeeded")
 
     def test_existing_or_uncertain_profile_is_never_overwritten_or_deleted(self):
         existing = [{"id": "existing-profile", "name": "Existing", "role": "employee", "status": "active"}]
@@ -968,7 +1111,10 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.query.insert.assert_not_called()
         self.profile_client.auth.admin.delete_user.assert_not_called()
         self.assertEqual(logs.output, ["ERROR:admin_users:employee_creation_reconciliation_required"])
+        self.assert_auth_audit("creation", "unknown", p_user_id=self.new_employee_id,
+                               p_stage="profile_lookup", p_reason_code="preexisting_profile")
 
+        self.profile_client.reset_mock()
         self.prepare_employee_creation()
         self.query.insert.return_value.execute.return_value = SimpleNamespace(data=[])
         self.result.side_effect = [
@@ -981,6 +1127,106 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 500)
         self.profile_client.auth.admin.delete_user.assert_not_called()
         self.assertEqual(uncertain_logs.output, ["ERROR:admin_users:employee_creation_reconciliation_required"])
+        self.assert_auth_audit("creation", "unknown", p_user_id=self.new_employee_id,
+                               p_stage="profile_insert", p_reason_code="profile_write_outcome_unknown",
+                               p_compensation_result="not_attempted")
+
+    def test_auth_intent_must_be_confirmed_before_any_external_operation(self):
+        for operation in ("creation", "deletion"):
+            for unconfirmed in (None, [], True, 0):
+                with self.subTest(operation=operation, unconfirmed=unconfirmed):
+                    self.profile_client.reset_mock()
+                    if operation == "creation":
+                        self.prepare_employee_creation()
+                    else:
+                        target_id = self.prepare_employee_deletion()
+                    self.profile_client.rpc.return_value.execute.return_value = SimpleNamespace(data=unconfirmed)
+                    response = (self.create_employee_request() if operation == "creation"
+                                else self.delete_employee_request(target_id))
+                    self.assertEqual(response.status_code, 503)
+                    self.profile_client.auth.admin.create_user.assert_not_called()
+                    self.profile_client.auth.admin.delete_user.assert_not_called()
+                    self.query.insert.assert_not_called()
+                    self.profile_client.rpc.assert_called_once()
+
+    def test_auth_intent_errors_preserve_authorization_and_block_external_calls(self):
+        for code, expected in (("42501", 403), ("P0002", 404), ("P0001", 409), ("XX000", 503)):
+            with self.subTest(code=code):
+                self.profile_client.reset_mock()
+                target_id = self.prepare_employee_deletion()
+                self.profile_client.rpc.return_value.execute.side_effect = APIError({
+                    "code": code, "message": "private audit error", "details": None, "hint": None,
+                })
+                response = self.delete_employee_request(target_id)
+                self.assertEqual(response.status_code, expected)
+                self.assertNotIn("private audit error", response.text)
+                self.profile_client.auth.admin.delete_user.assert_not_called()
+
+    def test_result_audit_failure_never_repeats_auth_or_compensates_success(self):
+        for operation in ("creation", "deletion"):
+            with self.subTest(operation=operation):
+                self.profile_client.reset_mock()
+                if operation == "creation":
+                    self.prepare_employee_creation()
+                else:
+                    target_id = self.prepare_employee_deletion()
+                self.profile_client.rpc.return_value.execute.side_effect = [
+                    SimpleNamespace(data=1), RuntimeError("private result failure"),
+                ]
+                response = (self.create_employee_request() if operation == "creation"
+                            else self.delete_employee_request(target_id))
+                self.assertEqual(response.status_code, 503)
+                self.assertNotIn("private result failure", response.text)
+                self.assertIn("Reconcilia", response.json()["detail"])
+                if operation == "creation":
+                    self.profile_client.auth.admin.create_user.assert_called_once()
+                    self.profile_client.auth.admin.delete_user.assert_not_called()
+                    self.assert_auth_audit(operation, "succeeded", p_user_id=self.new_employee_id)
+                else:
+                    self.profile_client.auth.admin.delete_user.assert_called_once_with(target_id)
+                    self.assert_auth_audit(operation, "succeeded", p_user_id=target_id)
+                self.profile_client.rpc.return_value.execute.side_effect = None
+
+    def test_auth_rejections_and_timeouts_have_only_confirmed_outcomes(self):
+        for operation in ("creation", "deletion"):
+            for status, outcome in ((400, "failed"), (408, "unknown"), (500, "unknown")):
+                with self.subTest(operation=operation, status=status):
+                    self.profile_client.reset_mock()
+                    if operation == "creation":
+                        self.prepare_employee_creation()
+                        external = self.profile_client.auth.admin.create_user
+                    else:
+                        target_id = self.prepare_employee_deletion()
+                        external = self.profile_client.auth.admin.delete_user
+                    external.side_effect = AuthApiError("private provider error", status, "unexpected_failure")
+                    response = (self.create_employee_request() if operation == "creation"
+                                else self.delete_employee_request(target_id))
+                    self.assertEqual(response.status_code, 502)
+                    self.assertNotIn("private provider error", response.text)
+                    external.assert_called_once()
+                    self.query.insert.assert_not_called()
+                    metadata = {"p_stage": "auth_create" if operation == "creation" else "auth_delete",
+                                "p_reason_code": "auth_rejected" if outcome == "failed" else "remote_outcome_unknown"}
+                    if operation == "deletion":
+                        metadata["p_user_id"] = target_id
+                    self.assert_auth_audit(operation, outcome, **metadata)
+                    external.side_effect = None
+
+    def test_uncertain_compensation_is_unknown_and_never_reported_as_failure(self):
+        self.prepare_employee_creation()
+        self.query.insert.return_value.execute.side_effect = RuntimeError("insert failed")
+        self.result.side_effect = [
+            SimpleNamespace(data=[{"id": self.user_id, "role": "admin", "status": "active"}]),
+            SimpleNamespace(data=[]), SimpleNamespace(data=[]),
+        ]
+        self.profile_client.auth.admin.delete_user.side_effect = TimeoutError("private compensation timeout")
+        response = self.create_employee_request()
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn("private compensation timeout", response.text)
+        self.profile_client.auth.admin.delete_user.assert_called_once_with(self.new_employee_id)
+        self.assert_auth_audit("creation", "unknown", p_user_id=self.new_employee_id,
+                               p_stage="compensation", p_reason_code="compensation_unconfirmed",
+                               p_compensation_result="unknown")
 
     def directory_user(self, value, email=None):
         user_id = str(UUID(int=value))

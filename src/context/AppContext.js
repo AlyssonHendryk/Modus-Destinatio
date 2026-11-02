@@ -21,6 +21,7 @@ import {
 
 import {
   getOrders,
+  updateProfileName,
   createOrder,
   updateOrder,
   transitionOrderSeparation,
@@ -32,6 +33,11 @@ import {
   removeProduct,
   getStockMovements,
 } from "@/services/backend"
+
+import {
+  DEFAULT_PREFERENCES, normalizePreferences, loadUserPreferences,
+  saveUserPreferences, applyPreferenceTheme, preferencesStorage,
+} from "@/utils/userPreferences"
 
 const AppContext = createContext(null)
 
@@ -71,7 +77,19 @@ export function AppProvider({ children }) {
   const profileValidating = useRef(true)
   const loginPending = useRef(false)
 
+  const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES)
+  const preferencesRef = useRef(DEFAULT_PREFERENCES)
+  const preferencesOwner = useRef(null)
+
   const applyAuthUser = useCallback((user) => {
+    const owner = user?.id ?? null
+    if (preferencesOwner.current !== owner || !user) {
+      const loaded = loadUserPreferences(preferencesStorage(), owner)
+      preferencesOwner.current = owner
+      preferencesRef.current = loaded
+      setPreferences(loaded)
+      applyPreferenceTheme(loaded)
+    }
     if (authenticatedId.current !== (user?.id ?? null) ||
         authenticatedRole.current !== (user?.role ?? null) || !user) {
       // Invalidate pending reads/mutations before React renders the new session.
@@ -96,6 +114,8 @@ export function AppProvider({ children }) {
   useEffect(() => {
     let active = true
     let timer
+    applyPreferenceTheme(preferencesRef.current)
+    loadUserPreferences(preferencesStorage(), null)
     // Sanitize all known app copies before any cache can be restored.
     try { sanitizeAppCaches(window.localStorage || localStorage, window.sessionStorage) } catch { /* storage unavailable */ }
 
@@ -319,6 +339,9 @@ export function AppProvider({ children }) {
 
   async function saveOrder(data) {
     const version = captureSession()
+    if (orders.find(order => order.id === data.id)?.status === "completed") {
+      throw new Error("Pedidos concluídos não podem ser editados.")
+    }
     const normalized = normalizeOrder(data)
     // Operational offline cache is never a source of administrative prices.
     if (parseCurrency(normalized.total) === undefined ||
@@ -767,6 +790,18 @@ export function AppProvider({ children }) {
   }
 
 
+  async function saveProfileName(name) {
+    const version = captureSession()
+    const userId = authenticatedId.current
+    const result = await updateProfileName(name)
+    if (!isCurrentSession(version)) throw new Error("Sessão alterada. Entre novamente.")
+    if (result?.id !== userId || typeof result.name !== "string" || !result.name.trim()) {
+      throw new Error("Não foi possível confirmar a atualização do nome.")
+    }
+    setAuthUser(current => current?.id === userId ? { ...current, name: result.name } : current)
+    return result
+  }
+
   async function logout() {
     authVersion.current += 1
     applyAuthUser(null)
@@ -1065,7 +1100,25 @@ export function AppProvider({ children }) {
   }
 
 
+  function updatePreferences(patch) {
+    if (profileValidating.current || !authenticatedId.current ||
+        authUser?.id !== authenticatedId.current) return
+    const next = normalizePreferences({ ...preferencesRef.current, ...patch })
+    preferencesRef.current = next
+    setPreferences(next)
+    applyPreferenceTheme(next)
+  }
+
+  function persistPreferences(value = preferencesRef.current) {
+    if (profileValidating.current || !authenticatedId.current ||
+        authUser?.id !== authenticatedId.current) return false
+    return saveUserPreferences(preferencesStorage(), authenticatedId.current, value)
+  }
+
   const value = {
+    preferences,
+    updatePreferences,
+    persistPreferences,
 
     hydrated,
 
@@ -1125,6 +1178,8 @@ export function AppProvider({ children }) {
 
     
     currentUser,
+
+    saveProfileName,
 
     login,
 

@@ -32,6 +32,12 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+*.key
+*.p12
+*.pfx
+
+# Private local documents
+docs/TG (2).docx
 
 # vercel
 .vercel

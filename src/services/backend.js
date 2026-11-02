@@ -109,6 +109,13 @@ function fromBackendOrder(order) {
 }
 
 
+export async function updateProfileName(name) {
+  return request("/api/profile", {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  })
+}
+
 async function request(endpoint, options = {}) {
   // getSession refreshes an expired session through the existing Supabase client.
   const { data, error } = await supabase.auth.getSession()
@@ -393,4 +400,18 @@ export async function removeProduct(productId) {
 
 export async function getStockMovements() {
   return request("/api/stock-movements")
+}
+
+export async function getActivityLogs(filters = {}, cursor = null, signal) {
+  const query = new URLSearchParams({ limit: "50" })
+  for (const key of ["user_id", "action", "date_from", "date_to"]) {
+    if (filters[key]) query.set(key, filters[key])
+  }
+  if (cursor) query.set("cursor", cursor)
+  const data = await request(`/api/admin/activity-logs?${query}`, { signal })
+  if (!data || !Array.isArray(data.events) || typeof data.has_more !== "boolean" ||
+      (data.has_more ? typeof data.next_cursor !== "string" || !data.next_cursor : data.next_cursor !== null)) {
+    throw new Error("Não foi possível carregar o histórico de atividades.")
+  }
+  return data
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { LayoutDashboard, ShoppingCart, Package, ClipboardList, Settings, LogOut } from "lucide-react"
+import { LayoutDashboard, ShoppingCart, Package, ClipboardList, History, Settings, LogOut } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useApp } from "@/context/AppContext"
@@ -12,6 +12,7 @@ export default function Sidebar({ activeTab, onTabChange }) {
     { id: "dashboard", label: "Tela Inicial", icon: LayoutDashboard },
     { id: "pedidos", label: "Pedidos", icon: ShoppingCart },
     { id: "estoque", label: "Estoque", icon: Package },
+    { id: "historico", label: "Histórico", icon: History },
     { id: "separar", label: "Separar Pedidos", icon: ClipboardList },
   ]
   const displayName = currentUser?.name || "Visitante"
@@ -43,7 +44,14 @@ async function handleLogout() {
         {menuItems.map((item) => {
           const Icon = item.icon
           const isActive = activeTab === item.id
-          return <button key={item.id} onClick={() => onTabChange?.(item.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${isActive ? "bg-gradient-to-r from-[#F97316] to-[#7C3AED] shadow-lg text-white" : "text-white/70 hover:bg-white/5 hover:text-white"}`}><Icon className="w-5 h-5" /><span className="text-sm font-medium">{item.label}</span></button>
+          return <button key={item.id} onClick={() => {
+            onTabChange?.(item.id)
+            if (item.id === "historico") router.push("/historico")
+            else if (activeTab === "historico") {
+              const routes = { dashboard: "/dashboard", pedidos: "/Orders", estoque: "/estoque", separar: "/separar-pedidos" }
+              router.push(routes[item.id])
+            }
+          }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${isActive ? "bg-gradient-to-r from-[#F97316] to-[#7C3AED] shadow-lg text-white" : "text-white/70 hover:bg-white/5 hover:text-white"}`}><Icon className="w-5 h-5" /><span className="text-sm font-medium">{item.label}</span></button>
         })}
       </nav>
       <div className="p-4 border-t border-white/10 space-y-2">

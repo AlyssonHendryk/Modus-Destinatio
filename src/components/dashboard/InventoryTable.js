@@ -5,14 +5,15 @@ import { AlertTriangle, Plus, Minus, Trash2, Edit2, Save, X } from "lucide-react
 import { useApp } from "@/context/AppContext"
 import { formatCurrency } from "@/utils/formatters"
 import { canViewFinancials } from "@/utils/financialPresentation"
+import ProductEditModal from "./ProductEditModal"
 
 
 export default function InventoryTable({ compact = false, search = "" }) {
   const { inventory, saveProduct, deleteProduct, changeStock, currentUser } = useApp()
   const isAdmin = canViewFinancials(currentUser)
 
-  const [editing, setEditing] = useState(null)
   const [showForm, setShowForm] = useState(false)
+  const [editingProduct, setEditingProduct] = useState(null)
   const [movingProductId, setMovingProductId] = useState(null)
 
   const [form, setForm] = useState({
@@ -41,16 +42,13 @@ export default function InventoryTable({ compact = false, search = "" }) {
 
   function openCreate() {
     if (!isAdmin) return
-    setEditing(null)
     setForm({ name: "", quantity: 0, max: 100, min: 10, unitPrice: 0, active: true })
     setShowForm(true)
   }
 
   function openEdit(item) {
     if (!isAdmin) return
-    setEditing(item.id)
-    setForm(item)
-    setShowForm(true)
+    setEditingProduct(item)
   }
 
   async function submit(e) {
@@ -64,11 +62,10 @@ export default function InventoryTable({ compact = false, search = "" }) {
     try {
       await saveProduct({
         ...form,
-        id: editing || undefined,
+        id: undefined,
       })
 
       setShowForm(false)
-      setEditing(null)
 
     } catch (error) {
       console.error(
@@ -135,70 +132,39 @@ export default function InventoryTable({ compact = false, search = "" }) {
           onSubmit={submit}
           className="mb-6 border rounded-xl p-4 grid md:grid-cols-6 gap-3 bg-gray-50"
         >
-          <input
-            value={form.name}
-            onChange={e => setForm({ ...form, name: e.target.value })}
-            placeholder="Produto"
-            className="md:col-span-2 border rounded-lg p-2 text-gray-900"
-          />
+          <div className="md:col-span-2 space-y-1">
+            <label htmlFor="product-name" className="block text-xs font-medium text-gray-700">Nome do produto</label>
+            <input id="product-name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+              placeholder="Ex.: Arroz integral" className="form-control w-full rounded-lg p-2 text-gray-900" />
+          </div>
 
-          <input
-            type="number"
-            min="0"
-            value={form.quantity}
-            onChange={e => setForm({
-              ...form,
-              quantity: Number(e.target.value)
-            })}
-            disabled={editing !== null}
-            title={
-              editing !== null
-                ? "A quantidade deve ser alterada por movimentações de estoque."
-                : "Quantidade inicial do produto."
-            }
-            placeholder="Qtd."
-            className={`border rounded-lg p-2 text-gray-900 ${editing !== null
-              ? "bg-gray-200 cursor-not-allowed opacity-70"
-              : ""
-              }`}
-          />
+          <div className="space-y-1">
+            <label htmlFor="product-quantity" className="block text-xs font-medium text-gray-700">Quantidade</label>
+            <input id="product-quantity" type="number" min="0" value={form.quantity} onChange={e => setForm({
+              ...form, quantity: Number(e.target.value)
+            })} title="Quantidade inicial do produto." placeholder="0" className="form-control w-full rounded-lg p-2 text-gray-900" />
+          </div>
 
-          <input
-            type="number"
-            min="1"
-            value={form.max}
-            onChange={e => setForm({
-              ...form,
-              max: Number(e.target.value)
-            })}
-            placeholder="Máx."
-            className="border rounded-lg p-2 text-gray-900"
-          />
+          <div className="space-y-1">
+            <label htmlFor="product-min" className="block text-xs font-medium text-gray-700">Estoque mínimo</label>
+            <input id="product-min" type="number" min="0" value={form.min} onChange={e => setForm({
+              ...form, min: Number(e.target.value)
+            })} placeholder="0" className="form-control w-full rounded-lg p-2 text-gray-900" />
+          </div>
 
-          <input
-            type="number"
-            min="0"
-            value={form.min}
-            onChange={e => setForm({
-              ...form,
-              min: Number(e.target.value)
-            })}
-            placeholder="Mín."
-            className="border rounded-lg p-2 text-gray-900"
-          />
+          <div className="space-y-1">
+            <label htmlFor="product-max" className="block text-xs font-medium text-gray-700">Estoque máximo</label>
+            <input id="product-max" type="number" min="1" value={form.max} onChange={e => setForm({
+              ...form, max: Number(e.target.value)
+            })} placeholder="100" className="form-control w-full rounded-lg p-2 text-gray-900" />
+          </div>
 
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={form.unitPrice}
-            onChange={e => setForm({
-              ...form,
-              unitPrice: Number(e.target.value)
-            })}
-            placeholder="Preço"
-            className="border rounded-lg p-2 text-gray-900"
-          />
+          <div className="space-y-1">
+            <label htmlFor="product-price" className="block text-xs font-medium text-gray-700">Preço unitário</label>
+            <input id="product-price" type="number" min="0" step="0.01" value={form.unitPrice} onChange={e => setForm({
+              ...form, unitPrice: Number(e.target.value)
+            })} placeholder="0,00" className="form-control w-full rounded-lg p-2 text-gray-900" />
+          </div>
 
           <div className="md:col-span-6 flex justify-end gap-2">
             <button
@@ -215,7 +181,7 @@ export default function InventoryTable({ compact = false, search = "" }) {
               className="px-3 py-2 bg-purple-600 text-white rounded-lg flex items-center gap-1"
             >
               <Save className="w-4 h-4" />
-              Salvar
+              Cadastrar produto
             </button>
           </div>
         </form>
@@ -312,6 +278,12 @@ export default function InventoryTable({ compact = false, search = "" }) {
 
         </div>
       })}</div>
+
+      <ProductEditModal
+        isOpen={isAdmin && editingProduct !== null}
+        product={editingProduct}
+        onClose={() => setEditingProduct(null)}
+      />
     </div>
   )
 }

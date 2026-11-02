@@ -9,7 +9,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 // Compile the actual JSX with Next's installed Babel and render with React SSR.
-// Only external context, navigation, icons and chart primitives are substituted.
+// External services, context, navigation, icons and chart primitives are substituted.
 const require = createRequire(import.meta.url)
 const babel = require('next/dist/compiled/babel/core')
 const root = fileURLToPath(new URL('../', import.meta.url))
@@ -24,6 +24,7 @@ const files = {
   header: 'src/components/Orders/OrdersHeader.js',
   dashboard: 'src/components/Dashboard.js',
   separation: 'src/components/separation/OrderSeparationGrid.js',
+  historyPage: 'src/app/historico/page.js',
 }
 const product = { id: 'P1', name: 'Produto operacional', quantity: 8, min: 2, max: 20, active: true, unitPrice: 12.75 }
 const order = {
@@ -44,6 +45,7 @@ function render(name, role, props = {}, options = {}) {
   const modules = new Map()
   const hookIndexes = new Map()
   function load(relative) {
+    relative = relative.replaceAll('\\', '/')
     const filename = path.resolve(root, relative)
     if (modules.has(filename)) return modules.get(filename).exports
     if (!compiled.has(filename)) {
@@ -57,6 +59,9 @@ function render(name, role, props = {}, options = {}) {
     modules.set(filename, loadedModule)
     const localRequire = specifier => {
       if (specifier === '@/context/AppContext') return { useApp: () => app }
+      if (specifier === '@/services/backend') return new Proxy({}, {
+        get: (_target, method) => () => { throw new Error(`SSR must not call backend service: ${String(method)}`) },
+      })
       if (specifier === 'next/navigation') return { useRouter: () => ({ replace() {}, push() {} }) }
       if (specifier === 'next/link') return { __esModule: true, default: ({ children, href }) => React.createElement('a', { href }, children) }
       if (specifier === 'lucide-react') return new Proxy({}, {
@@ -204,4 +209,70 @@ test('dashboard keeps the employee order view and separation controls', () => {
   assertNoFinancials(separating)
   const confirming = render('separation', 'employee', { orders: [{ ...order, status: 'separating' }] })
   assert.match(confirming, /Concluir Separação/)
+})
+
+
+test('completed orders remain readable without Edit while active and shipped orders retain admin editing', () => {
+  for (const status of ['completed', 'waiting', 'separating', 'shipped']) {
+    const html = render('orders', 'admin', { orders: [{ ...order, status }] }, { states: { [files.orders]: { 0: 'O1' } } })
+    assert.match(html, /Produto operacional/)
+    if (status === 'completed') assert.doesNotMatch(html, /aria-label="Editar pedido/)
+    else assert.match(html, /aria-label="Editar pedido/)
+    assert.doesNotMatch(render('orders', 'employee', { orders: [{ ...order, status }] }), /aria-label="Editar pedido/)
+  }
+})
+
+test('an open order modal disables saving when the live order becomes completed', () => {
+  const html = render('modal', 'admin', { isOpen: true, orderToEdit: order }, {
+    app: { orders: [{ ...order, status: 'completed' }] },
+  })
+  assert.match(html, /Pedido concluído/)
+  assert.match(html, /type="submit" disabled=""/)
+  assert.match(render('modal', 'admin', { isOpen: true }), /Criar Novo Pedido/)
+})
+
+test('history route is protected and shows both reused histories for admin and employee', () => {
+  for (const role of ['admin', 'employee']) {
+    const html = render('historyPage', role)
+    assert.match(html, /Histórico de movimentações/)
+    assert.match(html, /Histórico de pedidos/)
+    assert.match(html, /history-order-search/)
+    assert.match(html, /history-order-period/)
+    if (role === 'admin') assert.match(html, /id="activity-title"/)
+    else assert.doesNotMatch(html, /id="activity-title"|Usuário responsável/)
+    assertNoFinancials(html)
+    assert.match(html, /data-icon="History"/)
+    const stock = render('dashboard', role, { initialTab: 'estoque' })
+    const separation = render('dashboard', role, { initialTab: 'separar' })
+    for (const old of [stock, separation]) {
+      assert.doesNotMatch(old, /Histórico de movimentações|Histórico de pedidos|history-order-search/)
+    }
+  }
+  assert.equal(render('historyPage', null), '')
+  assert.doesNotMatch(render('historyPage', 'admin', {}, { status: 'inactive' }), /id="activity-title"/)
+  const loading = render('historyPage', 'admin', {}, { app: { authLoading: true } })
+  assert.match(loading, /Verificando sessão/)
+  assert.doesNotMatch(loading, /history-order-search/)
+})
+
+
+test('history route retains five initial orders, expanded details, filters and show more/less', () => {
+  const orders = Array.from({ length: 6 }, (_, i) => ({ ...order, id: `H${i}`, status: 'completed' }))
+  const app = { orders }
+  const initial = render('historyPage', 'employee', {}, { app })
+  assert.equal((initial.match(/<article/g) || []).length, 5)
+  assert.match(initial, /Ver mais pedidos/)
+  const historyFile = 'src/components/separation/OrderSeparationHistory.js'
+  const expanded = render('historyPage', 'employee', {}, { app, states: { [historyFile]: { 2: true, 3: 'H0' } } })
+  assert.equal((expanded.match(/<article/g) || []).length, 6)
+  assert.match(expanded, /Ver menos/)
+  assert.match(expanded, /Produtos e quantidades/)
+  assert.match(expanded, /Produto operacional/)
+  assertNoFinancials(expanded)
+  const filtered = render('historyPage', 'employee', {}, { app, states: { [historyFile]: { 0: 'H5' } } })
+  assert.equal((filtered.match(/<article/g) || []).length, 1)
+  assert.match(filtered, /Pedido H5/)
+  for (const control of ['movement-search', 'movement-type', 'movement-start-date', 'movement-end-date', 'history-order-search', 'history-order-period']) {
+    assert.match(initial, new RegExp(`id="${control}"`))
+  }
 })
