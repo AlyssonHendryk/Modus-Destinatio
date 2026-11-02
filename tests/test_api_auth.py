@@ -173,7 +173,7 @@ class ApiAuthenticationTests(unittest.TestCase):
             "min": 1, "max": 100, "unitPrice": 2.5, "active": True,
         }
         order = {
-            "id": "test-order", "supplier": "Test supplier", "operation": "Venda",
+            "id": "test-order", "customer": "Test customer", "supplier": "Test supplier", "operation": "Venda",
             "status": "waiting", "date": "01/01/2026", "total": 2.5,
             "items": [{"productId": "test-product", "product": "Test product",
                        "quantity": 1, "unitPrice": 2.5}],
@@ -248,15 +248,17 @@ class ApiAuthenticationTests(unittest.TestCase):
                     })
                 elif method == "POST":
                     self.assertEqual(response.json(), order_response)
-                    self.profile_client.rpc.assert_called_once_with("create_order_with_stock", {
+                    self.profile_client.rpc.assert_called_once_with("create_order_with_customer_and_stock", {
                         "p_order_id": body["id"], "p_supplier": body["supplier"],
+                        "p_customer": body["customer"],
                         "p_operation": body["operation"], "p_status": body["status"],
                         "p_order_date": body["date"], "p_total": body["total"], "p_items": body["items"],
                     })
                 elif method == "PUT" and path.startswith("/api/orders/"):
                     self.assertEqual(response.json(), order_response)
-                    self.profile_client.rpc.assert_called_once_with("update_order_with_stock", {
+                    self.profile_client.rpc.assert_called_once_with("update_order_with_customer_and_stock", {
                         "p_order_id": body["id"], "p_supplier": body["supplier"],
+                        "p_customer": body["customer"],
                         "p_operation": body["operation"], "p_status": body["status"],
                         "p_order_date": body["date"], "p_total": body["total"], "p_items": body["items"],
                     })
@@ -274,6 +276,45 @@ class ApiAuthenticationTests(unittest.TestCase):
                     self.profile_client.rpc.assert_called_once_with(
                         "move_product_stock", {"p_product_id": "test-product", "p_delta": 1}
                     )
+
+    def test_order_write_keeps_customer_distinct_and_accepts_legacy_null(self):
+        self.set_profile("admin")
+        order = self.administrative_requests()[4][2]
+        legacy_request = {key: value for key, value in order.items() if key != "customer"}
+        legacy_response = {**legacy_request, "customer": None, "stock_applied": True}
+
+        with patch("main.get_order_from_database", return_value=legacy_response):
+            response = self.client.post(
+                "/api/orders", json=legacy_request,
+                headers={"Authorization": "Bearer " + self.token()},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["customer"])
+        self.assertEqual(response.json()["supplier"], "Test supplier")
+        self.profile_client.rpc.assert_called_once_with(
+            "create_order_with_customer_and_stock", {
+                "p_order_id": legacy_request["id"],
+                "p_supplier": "Test supplier", "p_customer": None,
+                "p_operation": legacy_request["operation"], "p_status": legacy_request["status"],
+                "p_order_date": legacy_request["date"], "p_total": legacy_request["total"],
+                "p_items": legacy_request["items"],
+            },
+        )
+        self.assertNotIn("create_order_with_stock", str(self.profile_client.rpc.call_args))
+
+    def test_order_parties_reject_blank_values_without_rpc(self):
+        self.set_profile("admin")
+        order = self.administrative_requests()[4][2]
+        for field in ("customer", "supplier"):
+            with self.subTest(field=field):
+                self.profile_client.rpc.reset_mock()
+                response = self.client.post(
+                    "/api/orders", json={**order, field: "   "},
+                    headers={"Authorization": "Bearer " + self.token()},
+                )
+                self.assertEqual(response.status_code, 422)
+                self.profile_client.rpc.assert_not_called()
 
     def test_employee_retains_all_gets(self):
         self.set_profile("employee")
@@ -375,7 +416,7 @@ class ApiAuthenticationTests(unittest.TestCase):
             "financial_metadata": {"margin": 77}, "unknown_column": "not-public",
         }
         order = {
-            "id": "O1", "supplier": "Test supplier", "operation": "Venda",
+            "id": "O1", "customer": "Test customer", "supplier": "Test supplier", "operation": "Venda",
             "status": "waiting", "order_date": "01/01/2026", "total": 25.5,
             "stock_applied": True, "revenue": 999, "unknown_column": "not-public",
             "order_items": [{
@@ -425,12 +466,33 @@ class ApiAuthenticationTests(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [{
-            "id": "O1", "supplier": "Test supplier", "operation": "Venda",
+            "id": "O1", "customer": "Test customer", "supplier": "Test supplier", "operation": "Venda",
             "status": "waiting", "date": "01/01/2026",
             "items": [{"productId": "P1", "product": "Test product", "quantity": 2}],
         }])
         table.select.assert_called_once_with(
-            "id,supplier,operation,status,order_date,order_items(product_id,product,quantity)"
+            "id,customer,supplier,operation,status,order_date,order_items(product_id,product,quantity)"
+        )
+        self.profile_client.rpc.assert_not_called()
+
+    def test_legacy_order_null_customer_is_read_without_supplier_fallback(self):
+        _, order, _ = self.financial_read_fixtures()
+        self.set_profile("employee")
+        legacy_order = {**order, "customer": None}
+        table = self.set_read_rows([legacy_order])
+
+        response = self.client.get("/api/orders", headers={
+            "Authorization": "Bearer " + self.token(),
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [{
+            "id": "O1", "customer": None, "supplier": "Test supplier",
+            "operation": "Venda", "status": "waiting", "date": "01/01/2026",
+            "items": [{"productId": "P1", "product": "Test product", "quantity": 2}],
+        }])
+        table.select.assert_called_once_with(
+            "id,customer,supplier,operation,status,order_date,order_items(product_id,product,quantity)"
         )
         self.profile_client.rpc.assert_not_called()
 
@@ -462,13 +524,13 @@ class ApiAuthenticationTests(unittest.TestCase):
             with self.subTest(total=total, price=price):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.json(), [{
-                    "id": "O1", "supplier": "Test supplier", "operation": "Venda",
+                    "id": "O1", "customer": "Test customer", "supplier": "Test supplier", "operation": "Venda",
                     "status": "waiting", "date": "01/01/2026", "total": total,
                     "stock_applied": True,
                     "items": [{"productId": "P1", "product": "Test product", "quantity": 2, "unitPrice": price}],
                 }])
                 table.select.assert_called_with(
-                    "id,supplier,operation,status,order_date,total,stock_applied,"
+                    "id,customer,supplier,operation,status,order_date,total,stock_applied,"
                     "order_items(product_id,product,quantity,unit_price)"
                 )
 

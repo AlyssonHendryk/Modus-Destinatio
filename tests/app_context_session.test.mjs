@@ -310,15 +310,15 @@ test('refresh rechecks profile status and clears an inactivated user', async () 
   assert.equal(h.calls.length, 3)
 })
 
-test('same-user network fallback preserves local functionality without crossing users', async () => {
+test('same-user network failures do not restore invalidated legacy caches', async () => {
   const h = harness('A')
   h.cache.set('modusdestinatio_state_v1:A', JSON.stringify({
     orders: [{ id: 'A-cached', items: [] }], tasks: [{ id: 'A-task' }], users: [],
   }))
   h.setRead(async () => { throw new Error('offline') })
   await h.settle()
-  assert.equal(h.value.orders[0].id, 'A-cached')
-  assert.equal(h.value.tasks[0].id, 'A-task')
+  assert.equal(h.value.orders.length, 0)
+  assert.equal(h.value.tasks.length, 0)
   assert.equal(h.value.backendError, 'offline')
   h.emit('SIGNED_IN', 'B')
   await h.settle()
@@ -504,9 +504,9 @@ test('legacy and tampered caches cannot grant financial access or restore creden
   await h.settle()
   assert.equal(h.value.currentUser.id, 'A')
   assert.equal(h.value.currentUser.role, 'employee')
-  assert.equal(Object.hasOwn(h.value.orders[0], 'total'), false)
-  assert.equal(Object.hasOwn(h.value.inventory[0], 'unitPrice'), false)
-  assert.equal(h.value.tasks[0].title, 'Local task')
+  assert.equal(h.value.orders.length, 0)
+  assert.equal(h.value.inventory.length, 0)
+  assert.equal(h.value.tasks.length, 0)
   for (const serialized of h.cache.values()) {
     assert.doesNotMatch(serialized, /unitPrice|total|password|authUser|currentUserId|financial|forged/)
   }
@@ -521,8 +521,8 @@ test('admin offline fallback never restores financial values even from an admin 
   h.setRead(async () => { throw new Error('offline') })
   await h.settle()
   assert.equal(h.value.currentUser.role, 'admin')
-  assert.equal(Object.hasOwn(h.value.orders[0], 'total'), false)
-  assert.equal(Object.hasOwn(h.value.inventory[0], 'unitPrice'), false)
+  assert.equal(h.value.orders.length, 0)
+  assert.equal(h.value.inventory.length, 0)
 })
 
 test('profile revalidation hides the previous view while leaving unchanged sessions loaded', async () => {
@@ -571,11 +571,13 @@ test('administrative edits cannot turn operational cached records into zero-valu
   h.setRead(async () => { throw new Error('offline') })
   await h.settle()
   const calls = h.calls.length
-  await assert.rejects(h.value.saveProduct(h.value.inventory[0]), /preço válido/)
-  await assert.rejects(h.value.saveOrder(h.value.orders[0]), /preços e total válidos/)
+  assert.equal(h.value.inventory.length, 0)
+  assert.equal(h.value.orders.length, 0)
+  await assert.rejects(h.value.saveProduct({ id: 'P1', name: 'Product' }), /preço válido/)
+  await assert.rejects(h.value.saveOrder({ id: 'O1', supplier: 'Supplier', customer: null, items: [] }), /preços e total válidos/)
   assert.equal(h.calls.length, calls)
   h.setRead(async (_name, data) => data)
-  const product = await h.value.saveProduct({ ...h.value.inventory[0], unitPrice: 0 })
+  const product = await h.value.saveProduct({ id: 'P1', name: 'Product', unitPrice: 0 })
   assert.equal(product.unitPrice, 0)
 })
 

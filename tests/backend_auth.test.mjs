@@ -225,7 +225,7 @@ test('order reads preserve operational fields and omit absent/invalid financial 
   for (const fields of [{}, { total: null, unitPrice: null },
     { total: 'invalid', unitPrice: 'invalid', price: 'invalid' }]) {
     const row = {
-      id: 'O1', supplier: 'Supplier', status: 'separating', date: '01/01/2026',
+      id: 'O1', customer: null, supplier: 'Supplier', status: 'separating', date: '01/01/2026',
       operation: 'Venda', stock_applied: true,
       ...(Object.hasOwn(fields, 'total') ? { total: fields.total } : {}),
       items: [{ productId: 'P1', product: 'Product', quantity: 2,
@@ -236,6 +236,8 @@ test('order reads preserve operational fields and omit absent/invalid financial 
     globalThis.fetch = async () => new Response(JSON.stringify([row]), { status: 200 })
     const [result] = await backend.getOrders()
     assert.equal(result.id, 'O1')
+    assert.equal(result.customer, null)
+    assert.equal(result.supplier, 'Supplier')
     assert.equal(result.status, 'separating')
     assert.equal(result.stock_applied, true)
     assert.equal(result.items[0].quantity, 2)
@@ -276,7 +278,7 @@ test('product reads distinguish absent/invalid prices from legitimate zero', asy
   }
 })
 
-test('administrative order create/update contracts retain zero and Brazilian money inputs', async t => {
+test('administrative order create/update contracts preserve independent parties and financial values', async t => {
   t.mock.method(console, 'log', () => {})
   session = { access_token: token }
   for (const method of ['POST', 'PUT']) {
@@ -284,17 +286,40 @@ test('administrative order create/update contracts retain zero and Brazilian mon
       globalThis.fetch = async (_url, options) => {
         assert.equal(options.method, method)
         const body = JSON.parse(options.body)
+        assert.equal(body.customer, 'Customer')
+        assert.equal(body.supplier, 'Supplier')
         assert.equal(body.total, expectedTotal)
         assert.equal(body.items[0].unitPrice, expectedPrice)
         assert.equal(body.items[0].quantity, 2)
         return new Response(JSON.stringify(body), { status: 200 })
       }
-      const order = { id: 'O1', total, items: [{ productId: 'P1', product: 'Product', quantity: 2, unitPrice: price }] }
+      const order = {
+        id: 'O1', customer: 'Customer', supplier: 'Supplier', total,
+        items: [{ productId: 'P1', product: 'Product', quantity: 2, unitPrice: price }],
+      }
       const result = await (method === 'POST' ? backend.createOrder(order) : backend.updateOrder(order))
       assert.equal(result.total, expectedTotal)
       assert.equal(result.items[0].unitPrice, expectedPrice)
     }
   }
+})
+
+test('legacy null customer is sent as null, never inferred from supplier or a placeholder', async t => {
+  t.mock.method(console, 'log', () => {})
+  session = { access_token: token }
+  globalThis.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body)
+    assert.equal(body.customer, null)
+    assert.equal(body.supplier, 'Supplier')
+    assert.notEqual(body.customer, 'Cliente não informado')
+    return new Response(JSON.stringify(body), { status: 200 })
+  }
+  const result = await backend.createOrder({
+    id: 'O1', customer: null, supplier: 'Supplier', total: 0,
+    items: [{ productId: 'P1', product: 'Product', quantity: 1, unitPrice: 0 }],
+  })
+  assert.equal(result.customer, null)
+  assert.equal(result.supplier, 'Supplier')
 })
 
 test('administrative product create/update contracts preserve numeric prices including zero', async () => {

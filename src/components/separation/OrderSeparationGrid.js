@@ -51,7 +51,7 @@ export default function OrderSeparationGrid({ orders = [], onStatusChange }) {
               </div>
               <div className="flex items-center gap-2 text-gray-700 mb-4">
                 <User className="w-4 h-4 text-gray-400"/>
-                <span className="text-sm">Cliente: <b>{order.customer}</b></span>
+                <span className="text-sm">Cliente: <b>{order.customer || "Cliente não informado"}</b></span>
               </div>
               <p className="text-xs text-gray-500 uppercase mb-2">Produtos</p>
               <ul className="space-y-2">

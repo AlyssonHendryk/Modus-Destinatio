@@ -125,6 +125,9 @@ export function OrdersTable({
             {pageOrders.map((order) => {
               const [bg, text, border, Icon] = config(order.status)
 
+              const customer = order.customer || "Cliente não informado"
+              const supplier = order.supplier || "Fornecedor não informado"
+
               const expanded = expandedOrder === order.id
 
               const isCancelled = order.status === "cancelled"
@@ -156,10 +159,10 @@ export function OrdersTable({
                     </td>
 
                     <td className="py-4 px-6 text-gray-900">
-                      <div>{order.customer}</div>
+                      <div>{customer}</div>
 
                       <div className="text-xs text-gray-500">
-                        {order.supplier}
+                        {supplier}
                       </div>
                     </td>
 

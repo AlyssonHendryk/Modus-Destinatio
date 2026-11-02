@@ -29,15 +29,21 @@ function parseMoney(value) {
   return Number(text.replace("R$", "").trim()) || 0
 }
 
+function nullableParty(value) {
+  if (typeof value !== "string") return null
+  const normalized = value.trim()
+  return normalized || null
+}
 
 function toBackendOrder(order) {
+  const customer = nullableParty(order.customer)
+  const supplier = nullableParty(order.supplier)
   return {
     id: String(order.id),
-
-    supplier:
-      order.supplier ||
-      order.customer ||
-      "",
+    // Customer and supplier are independent persisted fields. An absent
+    // customer is explicitly represented as null for legacy orders.
+    customer,
+    supplier: supplier || "",
 
     operation:
       order.operation ||
@@ -82,10 +88,12 @@ function toBackendOrder(order) {
 
 
 function fromBackendOrder(order) {
-  const { total: rawTotal, ...fields } = order
+  const { total: rawTotal, customer, supplier, ...fields } = order
   const total = parseCurrency(rawTotal)
   return {
     ...fields,
+    ...(customer === undefined ? {} : { customer }),
+    ...(supplier === undefined ? {} : { supplier }),
     ...(total === undefined ? {} : { total }),
     items: (order.items || []).map((item) => {
       const { unitPrice: rawPrice, price: legacyPrice, ...operational } = item

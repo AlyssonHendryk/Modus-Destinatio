@@ -63,14 +63,15 @@ test('admin and employee caches persist only operational records and local tasks
   }
 })
 
-test('all known legacy and current caches in both storages are sanitized without touching preferences or Auth', () => {
+test('legacy v1/v2 caches are discarded before restoration without touching preferences or Auth', () => {
   const raw = JSON.stringify(sensitive)
   const preferences = JSON.stringify({ theme: 'dark', language: 'pt' })
   const local = storage({
     modusdestinatio_state_v1: raw,
     'modusdestinatio_state_v1:A': raw,
     'modusdestinatio_state_v1:B': raw,
-    [operationalCacheKey('A', 'admin')]: JSON.stringify({ ...sensitive, version: 2, userId: 'A' }),
+    'modusdestinatio_operational_v2:A:admin': JSON.stringify({ ...sensitive, version: 2, userId: 'A' }),
+    [operationalCacheKey('A', 'admin')]: JSON.stringify({ ...sensitive, version: 3, userId: 'A' }),
     modusdestinatio_preferences: preferences,
     'sb-test-auth-token': 'sdk-managed-test-placeholder',
     unrelated: 'preserved',
@@ -78,10 +79,11 @@ test('all known legacy and current caches in both storages are sanitized without
   const session = storage({ 'modusdestinatio_state_v1:A': raw })
   sanitizeAppCaches(local, session)
   assert.equal(local.getItem('modusdestinatio_state_v1'), null)
-  for (const key of ['modusdestinatio_state_v1:A', 'modusdestinatio_state_v1:B', operationalCacheKey('A', 'admin')]) {
-    assertOperationalOnly(JSON.parse(local.getItem(key)))
+  for (const key of ['modusdestinatio_state_v1:A', 'modusdestinatio_state_v1:B', 'modusdestinatio_operational_v2:A:admin']) {
+    assert.equal(local.getItem(key), null)
   }
-  assertOperationalOnly(JSON.parse(session.getItem('modusdestinatio_state_v1:A')))
+  assert.equal(session.getItem('modusdestinatio_state_v1:A'), null)
+  assertOperationalOnly(JSON.parse(local.getItem(operationalCacheKey('A', 'admin'))))
   assert.equal(local.getItem('modusdestinatio_preferences'), preferences)
   assert.equal(local.getItem('sb-test-auth-token'), 'sdk-managed-test-placeholder')
   assert.equal(local.getItem('unrelated'), 'preserved')
@@ -90,25 +92,35 @@ test('all known legacy and current caches in both storages are sanitized without
   assert.equal(local.writes, writes, 'already sanitized storage must not trigger cross-tab write loops')
 })
 
-test('legacy fallback is sanitized before restoration and never assigns a cached role', () => {
+test('legacy fallback is rejected and never assigns a cached role', () => {
   const local = storage({ 'modusdestinatio_state_v1:A': JSON.stringify(sensitive) })
   const restored = loadOperationalCache(local, 'A', 'employee')
-  assertOperationalOnly(restored)
-  assertOperationalOnly(JSON.parse(local.getItem('modusdestinatio_state_v1:A')))
-  assert.equal(Object.hasOwn(restored, 'role'), false)
+  assert.equal(restored, null)
+  assert.equal(local.getItem('modusdestinatio_state_v1:A'), null)
   assert.equal(loadOperationalCache(local, 'B', 'employee'), null)
   assert.equal(loadOperationalCache(local, 'A', 'owner'), null)
 })
 
 test('malformed caches and ownership mismatches fail closed', () => {
   const key = operationalCacheKey('A', 'employee')
-  for (const raw of ['broken-json', 'null', '[]', JSON.stringify({ version: 2, userId: 'B', ...sensitive })]) {
+  for (const raw of ['broken-json', 'null', '[]', JSON.stringify({ version: 3, userId: 'B', ...sensitive })]) {
     const local = storage({ [key]: raw })
     assert.equal(loadOperationalCache(local, 'A', 'employee'), null)
   }
   const blocked = { getItem() { throw new Error('blocked') }, setItem() { throw new Error('blocked') } }
   assert.equal(loadOperationalCache(blocked, 'A', 'employee'), null)
   assert.doesNotThrow(() => persistOperationalCache(blocked, 'A', 'employee', sensitive))
+})
+
+test('v3 cache preserves a real null customer without fabricating one from supplier', () => {
+  const local = storage()
+  persistOperationalCache(local, 'A', 'employee', {
+    orders: [{ id: 'O1', customer: null, supplier: 'Supplier', status: 'waiting', items: [] }],
+    inventory: [], tasks: [],
+  })
+  const restored = loadOperationalCache(local, 'A', 'employee')
+  assert.equal(restored.orders[0].customer, null)
+  assert.equal(restored.orders[0].supplier, 'Supplier')
 })
 
 test('nonprimitive fields cannot smuggle nested financial records through allowed names', () => {

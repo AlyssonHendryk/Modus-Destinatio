@@ -112,6 +112,16 @@ test('employee orders keep expanded product/quantity details without monetary co
   assert.doesNotMatch(html, /Editar pedido|Edição bloqueada|>Ações</)
 })
 
+test('legacy orders display a customer fallback without storing it in the edit field', () => {
+  const legacy = { ...order, customer: null }
+  assert.match(render('orders', 'employee', { orders: [legacy] }, { states: { [files.orders]: { 0: 'O1' } } }), /Cliente não informado/)
+  assert.match(render('list', 'employee', { orders: [legacy] }), /Cliente não informado/)
+  assert.match(render('separation', 'employee', { orders: [legacy] }), /Cliente não informado/)
+  const modal = render('modal', 'admin', { isOpen: true, orderToEdit: legacy })
+  assert.match(modal, /placeholder="Nome do cliente"[^>]*value=""|value=""[^>]*placeholder="Nome do cliente"/)
+  assert.doesNotMatch(modal, /value="Cliente não informado"/)
+})
+
 test('employee recent orders and KPIs remain operational even if financial data is present', () => {
   assertNoFinancials(render('list', 'employee', { orders: [order] }))
   const html = render('kpis', 'employee', { orders: [order], inventory: [product] })

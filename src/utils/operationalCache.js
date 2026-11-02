@@ -1,18 +1,21 @@
 const LEGACY_KEY = "modusdestinatio_state_v1"
-const CACHE_PREFIX = "modusdestinatio_operational_v2:"
+const PREVIOUS_CACHE_PREFIX = "modusdestinatio_operational_v2:"
+const CACHE_PREFIX = "modusdestinatio_operational_v3:"
 
 const record = value => value !== null && typeof value === "object" && !Array.isArray(value)
 const fields = (value, schema) => {
   if (!record(value)) return {}
   return Object.fromEntries(Object.entries(schema).filter(([key, type]) =>
-    typeof value[key] === type && (type !== "number" || Number.isFinite(value[key]))
+    (type === "nullable-string"
+      ? value[key] === null || typeof value[key] === "string"
+      : typeof value[key] === type && (type !== "number" || Number.isFinite(value[key])))
   ).map(([key]) => [key, value[key]]))
 }
 
 export function projectOrders(value) {
   return (Array.isArray(value) ? value : []).filter(record).map(order => ({
     ...fields(order, {
-      id: "string", supplier: "string", customer: "string", operation: "string",
+      id: "string", supplier: "string", customer: "nullable-string", operation: "string",
       status: "string", date: "string", stock_applied: "boolean",
     }),
     items: (Array.isArray(order.items) ? order.items : Array.isArray(order.products) ? order.products : [])
@@ -61,16 +64,16 @@ export function sanitizeAppCaches(...storages) {
     try {
       const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index))
       for (const key of keys) {
-        if (key !== LEGACY_KEY && !key?.startsWith(`${LEGACY_KEY}:`) && !key?.startsWith(CACHE_PREFIX)) continue
+        if (key !== LEGACY_KEY && !key?.startsWith(`${LEGACY_KEY}:`) &&
+            !key?.startsWith(PREVIOUS_CACHE_PREFIX) && !key?.startsWith(CACHE_PREFIX)) continue
         const value = read(storage, key)
-        if (!value || key === LEGACY_KEY) {
-          // The unscoped legacy cache has no trustworthy owner.
+        if (!value || key === LEGACY_KEY || key?.startsWith(`${LEGACY_KEY}:`) ||
+            key?.startsWith(PREVIOUS_CACHE_PREFIX)) {
+          // v1/v2 data can contain a customer synthesized from supplier.
           storage.removeItem(key)
         } else if (key.startsWith(CACHE_PREFIX)) {
-          if (value.version !== 2 || typeof value.userId !== "string") storage.removeItem(key)
-          else write(storage, key, { version: 2, userId: value.userId, ...projectState(value) })
-        } else {
-          write(storage, key, projectState(value))
+          if (value.version !== 3 || typeof value.userId !== "string") storage.removeItem(key)
+          else write(storage, key, { version: 3, userId: value.userId, ...projectState(value) })
         }
       }
     } catch {
@@ -84,12 +87,10 @@ export function loadOperationalCache(storage, userId, role) {
   sanitizeAppCaches(storage)
   const cached = read(storage, operationalCacheKey(userId, role))
   if (cached) {
-    if (cached.version !== 2 || cached.userId !== userId) return null
+    if (cached.version !== 3 || cached.userId !== userId) return null
     return projectState(cached)
   }
-  // Migrate only the current user's scoped legacy data, never its identity/role.
-  const legacy = read(storage, `${LEGACY_KEY}:${userId}`)
-  return legacy ? projectState(legacy) : null
+  return null
 }
 
 export function persistOperationalCache(storage, userId, role, state) {
@@ -97,7 +98,7 @@ export function persistOperationalCache(storage, userId, role, state) {
   try {
     sanitizeAppCaches(storage)
     write(storage, operationalCacheKey(userId, role), {
-      version: 2, userId, ...projectState(state),
+      version: 3, userId, ...projectState(state),
     })
   } catch {
     // A storage failure must not prevent normal online operation.

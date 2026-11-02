@@ -58,7 +58,7 @@ app.add_middleware(
 # SCHEMAS
 # ============================================================
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 
 class SeparationAction(BaseModel):
@@ -88,13 +88,26 @@ class OrderItem(BaseModel):
 
 class Order(BaseModel):
     id: str
-    supplier: str
+    supplier: str = Field(min_length=1)
+    # Compatibility during the frontend rollout: legacy requests did not send
+    # customer. Null is persisted as null; it is never inferred from supplier.
+    customer: Optional[str] = None
     operation: str
     status: str
     date: str
     total: float
     stock_applied: bool = False
     items: List[OrderItem] = Field(default_factory=list)
+
+    @field_validator("supplier", "customer")
+    @classmethod
+    def order_parties_must_not_be_blank(cls, value):
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Campo obrigat\u00f3rio n\u00e3o pode ser vazio.")
+        return value
 
 
 
@@ -126,6 +139,7 @@ class AdminOrderItemRead(OperationalOrderItemRead):
 class OperationalOrderRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
+    customer: Optional[str] = None
     supplier: str
     operation: str
     status: str
@@ -189,6 +203,7 @@ def format_order(row):
 
     return {
         "id": row["id"],
+        "customer": row.get("customer"),
         "supplier": row["supplier"],
         "operation": row["operation"],
         "status": row["status"],
@@ -229,7 +244,7 @@ def get_orders(user: AuthenticatedUser = Depends(require_active_user)):
 
     try:
 
-        columns = "id,supplier,operation,status,order_date"
+        columns = "id,customer,supplier,operation,status,order_date"
         if user.role == "admin":
             columns += ",total,stock_applied,order_items(product_id,product,quantity,unit_price)"
         else:
@@ -250,7 +265,7 @@ def get_orders(user: AuthenticatedUser = Depends(require_active_user)):
             return [AdminOrderRead(**format_order(row)) for row in response.data]
 
         return [OperationalOrderRead(
-            id=row["id"], supplier=row["supplier"], operation=row["operation"],
+            id=row["id"], customer=row.get("customer"), supplier=row["supplier"], operation=row["operation"],
             status=row["status"], date=row["order_date"],
             items=[OperationalOrderItemRead(
                 productId=item["product_id"], product=item["product"], quantity=item["quantity"],
@@ -285,10 +300,11 @@ def create_order(order: Order):
 
         # Cria o pedido e movimenta o estoque em uma transação
         supabase.rpc(
-            "create_order_with_stock",
+            "create_order_with_customer_and_stock",
             {
                 "p_order_id": order.id,
                 "p_supplier": order.supplier,
+                "p_customer": order.customer,
                 "p_operation": order.operation,
                 "p_status": order.status,
                 "p_order_date": order.date,
@@ -382,10 +398,11 @@ def update_order(order_id: str, updated_order: Order):
         # Atualiza o pedido e ajusta o estoque
         # em uma única transação PostgreSQL
         supabase.rpc(
-            "update_order_with_stock",
+            "update_order_with_customer_and_stock",
             {
                 "p_order_id": order_id,
                 "p_supplier": updated_order.supplier,
+                "p_customer": updated_order.customer,
                 "p_operation": updated_order.operation,
                 "p_status": updated_order.status,
                 "p_order_date": updated_order.date,

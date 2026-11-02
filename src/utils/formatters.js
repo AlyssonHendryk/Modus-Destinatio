@@ -58,8 +58,10 @@ export function normalizeOrder(raw) {
   ...fields,
   stock_applied: raw.stock_applied === true,
   id: raw.id || `#${Date.now().toString().slice(-6)}`,
-  customer: raw.customer || raw.supplier || "Cliente não informado",
-  supplier: raw.supplier || raw.customer || "Não informado",
+  // Do not synthesize one party from the other. Legacy orders legitimately
+  // have a null customer until they are edited with a real customer value.
+  customer: typeof raw.customer === "string" && raw.customer.trim() ? raw.customer.trim() : null,
+  supplier: typeof raw.supplier === "string" && raw.supplier.trim() ? raw.supplier.trim() : null,
   operation: raw.operation || "Venda",
   status: statusMap[raw.status] || raw.status || "waiting",
   date: raw.date || new Date().toLocaleDateString("pt-BR"),

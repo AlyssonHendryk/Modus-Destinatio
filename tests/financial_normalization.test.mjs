@@ -37,7 +37,8 @@ test('normalization preserves operational data without creating financial fields
   for (const key of ['id', 'supplier', 'operation', 'status', 'date', 'stock_applied']) {
     assert.equal(result[key], operational[key])
   }
-  assert.equal(result.customer, 'Supplier')
+  assert.equal(result.customer, null)
+  assert.equal(result.supplier, 'Supplier')
   assert.deepEqual(result.items, operational.items)
   assert.equal(Object.hasOwn(result, 'total'), false)
   for (const key of ['unitPrice', 'price', 'subtotal', 'total']) {
@@ -45,6 +46,19 @@ test('normalization preserves operational data without creating financial fields
   }
   assert.deepEqual(normalizeOrder(result), result)
   assert.equal(Object.hasOwn(operational, 'total'), false)
+})
+
+test('normalization keeps customer and supplier independent for new and legacy orders', () => {
+  const distinct = normalizeOrder({
+    ...operational, customer: 'Customer', supplier: 'Supplier',
+  })
+  assert.equal(distinct.customer, 'Customer')
+  assert.equal(distinct.supplier, 'Supplier')
+
+  const legacy = normalizeOrder({ ...operational, customer: null })
+  assert.equal(legacy.customer, null)
+  assert.equal(legacy.supplier, 'Supplier')
+  assert.notEqual(legacy.customer, legacy.supplier)
 })
 
 test('missing totals are never inferred from empty, partial or fully priced items', () => {
