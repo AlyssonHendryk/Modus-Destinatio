@@ -705,7 +705,7 @@ export function AppProvider({ children }) {
    * POST /api/auth/register
    */
 
-  async function login(email, password, type) {
+  async function login(email, password) {
     if (loginPending.current) return { ok: false, message: "Login em andamento." }
     loginPending.current = true
     const version = ++authVersion.current
@@ -752,15 +752,6 @@ export function AppProvider({ children }) {
         return {
           ok: false,
           message: "Este usuário está desativado.",
-        }
-      }
-
-      if (type && profile.role !== type) {
-        await supabase.auth.signOut()
-
-        return {
-          ok: false,
-          message: "O perfil selecionado não corresponde a este usuário.",
         }
       }
 

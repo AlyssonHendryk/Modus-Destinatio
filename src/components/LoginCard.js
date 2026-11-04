@@ -1,4 +1,3 @@
-
 "use client"
 
 import { useState } from "react"
@@ -6,37 +5,31 @@ import { useRouter } from "next/navigation"
 import { useApp } from "@/context/AppContext"
 
 export default function LoginCard() {
-  const [role, setRole] = useState("admin")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-
   const router = useRouter()
   const { login } = useApp()
 
-  async function submit(e) {
-    e.preventDefault()
+  async function submit(event) {
+    event.preventDefault()
     setError("")
-
     if (!email.trim() || !password) {
       setError("Preencha e-mail e senha.")
       return
     }
 
     setLoading(true)
-
     try {
-      const result = await login(email, password, role)
-
+      const result = await login(email, password)
       if (!result.ok) {
         setError(result.message)
         return
       }
-
       router.push("/dashboard")
-    } catch (error) {
-      console.error("Erro ao autenticar:", error)
+    } catch (loginError) {
+      console.error("Erro ao autenticar:", loginError)
       setError("Não foi possível realizar o login. Tente novamente.")
     } finally {
       setLoading(false)
@@ -44,105 +37,28 @@ export default function LoginCard() {
   }
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl w-[420px] max-w-full overflow-hidden">
-      <div className="bg-gradient-to-r from-purple-600 to-orange-500 text-white text-center py-6 px-4">
-        <h1 className="text-2xl font-semibold">
-          Bem-vindo!
-        </h1>
-        <p className="text-sm mt-1">
-          Faça login para continuar
-        </p>
+    <div className="w-[420px] max-w-full overflow-hidden rounded-2xl bg-white shadow-xl">
+      <div className="bg-gradient-to-r from-purple-600 to-orange-500 px-4 py-6 text-center text-white">
+        <h1 className="text-2xl font-semibold">Bem-vindo!</h1>
+        <p className="mt-1 text-sm">Faça login para continuar</p>
       </div>
 
-      <form onSubmit={submit} className="p-6 space-y-4">
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => setRole("admin")}
-            className={`flex-1 py-2 rounded-xl text-sm font-medium ${
-              role === "admin"
-                ? "bg-purple-600 text-white"
-                : "bg-gray-200 text-gray-600"
-            }`}
-          >
-            👜 Administrador
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setRole("employee")}
-            className={`flex-1 py-2 rounded-xl text-sm font-medium ${
-              role === "employee"
-                ? "bg-orange-500 text-white"
-                : "bg-gray-200 text-gray-600"
-            }`}
-          >
-            👤 Funcionário
-          </button>
-        </div>
-
-        <label className="block text-sm font-medium text-gray-700">
+      <form onSubmit={submit} className="space-y-4 p-6">
+        <label htmlFor="login-email" className="block text-sm font-medium text-gray-700">
           E-mail
-          <div className="flex items-center border rounded-lg px-3 mt-1">
-            <span>📧</span>
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              type="email"
-              autoComplete="email"
-              required
-              className="w-full p-2 outline-none text-gray-800"
-            />
-          </div>
+          <input id="login-email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="email" required className="form-control mt-1 w-full rounded-lg p-2 text-gray-800" />
         </label>
 
-        <label className="block text-sm font-medium text-gray-700">
+        <label htmlFor="login-password" className="block text-sm font-medium text-gray-700">
           Senha
-          <div className="flex items-center border rounded-lg px-3 mt-1">
-            <span>🔒</span>
-            <input
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              type="password"
-              autoComplete="current-password"
-              required
-              className="w-full p-2 outline-none text-gray-800"
-            />
-          </div>
+          <input id="login-password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required className="form-control mt-1 w-full rounded-lg p-2 text-gray-800" />
         </label>
 
-        <button
-          type="button"
-          onClick={() => router.push("/forgotPass")}
-          className="block ml-auto text-sm text-purple-600 hover:underline"
-        >
-          Esqueceu a senha?
-        </button>
+        <button type="button" onClick={() => router.push("/forgotPass")} className="ml-auto block text-sm text-purple-600 hover:underline">Esqueceu a senha?</button>
+        {error && <p className="rounded-lg border border-red-200 bg-red-50 p-2 text-sm text-red-600" role="alert">{error}</p>}
+        <button type="submit" disabled={loading} className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-pink-500 py-3 font-medium text-white shadow-md disabled:cursor-not-allowed disabled:opacity-50">{loading ? "Entrando..." : "Entrar"}</button>
 
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">
-            {error}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-3 rounded-xl font-medium shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? "Entrando..." : "Entrar"}
-        </button>
-
-        <p className="text-center text-sm text-gray-600">
-          Não tem uma conta?{" "}
-          <button
-            type="button"
-            onClick={() => router.push("/SignUp")}
-            className="text-purple-600 hover:underline"
-          >
-            Cadastre-se
-          </button>
-        </p>
+        <p className="text-center text-sm text-gray-600">Não tem uma conta? <button type="button" onClick={() => router.push("/SignUp")} className="text-purple-600 hover:underline">Cadastre-se</button></p>
       </form>
     </div>
   )

@@ -226,11 +226,39 @@ test('persisted session and token refresh do not duplicate data reads', async ()
 test('login loads data without remounting the provider', async () => {
   const h = harness()
   await h.settle()
-  const result = await h.value.login('test@example.test', '', 'employee')
+  const result = await h.value.login('test@example.test', '')
   await h.settle()
   assert.equal(result.ok, true)
   assert.equal(h.value.currentUser.id, 'A')
   assert.equal(h.calls.length, 3)
+})
+
+test('single login derives admin and employee roles exclusively from their active profiles', async () => {
+  for (const role of ['admin', 'employee']) {
+    const h = harness()
+    h.profiles.set('A', { name: role, role, status: 'active' })
+    await h.settle()
+    const result = await h.value.login('test@example.test', 'test-password')
+    await h.settle()
+    assert.equal(result.ok, true)
+    assert.equal(result.user.role, role)
+    assert.equal(h.value.currentUser.role, role)
+  }
+})
+
+test('single login rejects inactive and invalid profiles even with Supabase credentials', async () => {
+  for (const profile of [
+    { name: 'Inactive', role: 'employee', status: 'inactive' },
+    { name: 'Invalid', role: 'manager', status: 'active' },
+  ]) {
+    const h = harness()
+    h.profiles.set('A', profile)
+    await h.settle()
+    const result = await h.value.login('test@example.test', 'test-password')
+    await h.settle()
+    assert.equal(result.ok, false)
+    assert.equal(h.value.currentUser, null)
+  }
 })
 
 test('logout clears memory and ignores pending reads', async () => {
@@ -703,7 +731,7 @@ test('explicit login applies saved theme before returning and reset only changes
   await h.settle()
   h.cache.set(preferencesUtils.preferencesKey('A'), JSON.stringify({ theme: 'dark' }))
   h.cache.set(preferencesUtils.preferencesKey('B'), JSON.stringify({ theme: 'dark' }))
-  const result = await h.value.login('test@example.test', 'test-password', 'employee')
+  const result = await h.value.login('test@example.test', 'test-password')
   assert.equal(result.ok, true)
   assert.equal(h.classes.has('modus-dark'), true)
   await h.settle()
@@ -759,7 +787,7 @@ test('profile name is synced only after API success and survives profile revalid
   assert.equal(h.value.currentUser.name, 'New Name')
   await h.value.logout()
   await h.settle()
-  await h.value.login('test@example.test', 'password', 'employee')
+  await h.value.login('test@example.test', 'password')
   await h.settle()
   assert.equal(h.value.currentUser.name, 'New Name')
   h.setRead(async () => { throw Error('API unavailable') })
