@@ -61,6 +61,8 @@ class ActivityEvent(BaseModel):
     occurred_at: datetime
     actor_id: UUID
     actor_role: Literal["admin", "employee"]
+    # Historical events can outlive their profile after account deletion.
+    actor_name: str | None = None
     action: ActivityAction
     entity_type: Literal["order", "product", "profile"]
     entity_id: str | None

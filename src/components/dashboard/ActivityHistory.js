@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { getActivityLogs } from "@/services/backend"
-import { ACTIVITY_ACTIONS, activityDetails, activityFilters } from "@/utils/activityPresentation"
+import { ACTIVITY_ACTIONS, activityActorLabel, activityDetails, activityFilters } from "@/utils/activityPresentation"
+import { ACTIVITY_POLL_INTERVAL, shouldPollActivityPage } from "@/utils/activityPolling"
 
 const EMPTY = { user_id: "", action: "", start: "", end: "" }
 const control = "form-control h-11 w-full rounded-lg px-3 text-sm text-gray-900"
@@ -15,22 +16,71 @@ export default function ActivityHistory({ user }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [validation, setValidation] = useState("")
+  const [pollRevision, setPollRevision] = useState(0)
+  const requestVersion = useRef(0)
+  const requestInFlight = useRef(false)
 
   useEffect(() => {
     if (user.role !== "admin" || user.status !== "active") return
     const controller = new AbortController()
+    const version = ++requestVersion.current
     let alive = true
-    getActivityLogs(query.filters, query.cursor, controller.signal).then(result => {
-      if (alive) { setPage(result); setError(""); setLoading(false) }
-    }).catch(failure => {
-      if (alive) {
-        setPage(null)
-        setError(failure.status === 422 ? "A consulta expirou ou é inválida. Atualize a listagem." : "Não foi possível carregar as atividades. Tente atualizar a listagem.")
-        setLoading(false)
-      }
-    })
-    return () => { alive = false; controller.abort() }
-  }, [query, user.id, user.role, user.status])
+    requestInFlight.current = true
+
+    getActivityLogs(query.filters, query.cursor, controller.signal)
+      .then(result => {
+        if (alive && version === requestVersion.current) {
+          setPage(result)
+          setError("")
+          setLoading(false)
+        }
+      })
+      .catch(failure => {
+        if (alive && version === requestVersion.current) {
+          setPage(null)
+          setError(failure.status === 422 ? "A consulta expirou ou é inválida. Atualize a listagem." : "Não foi possível carregar as atividades. Tente atualizar a listagem.")
+          setLoading(false)
+        }
+      })
+      .finally(() => {
+        if (version === requestVersion.current) requestInFlight.current = false
+      })
+
+    return () => {
+      alive = false
+      controller.abort()
+      requestInFlight.current = false
+    }
+  }, [pollRevision, query, user.id, user.role, user.status])
+
+  useEffect(() => {
+    if (user.role !== "admin" || user.status !== "active" || query.cursor !== null) return
+
+    let timer = null
+    const isHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden"
+    const clearTimer = () => {
+      if (timer !== null) window.clearTimeout(timer)
+      timer = null
+    }
+    const schedule = () => {
+      clearTimer()
+      if (isHidden()) return
+      timer = window.setTimeout(() => {
+        if (shouldPollActivityPage({ cursor: query.cursor, hidden: isHidden(), inFlight: requestInFlight.current })) {
+          setPollRevision(current => current + 1)
+        }
+        schedule()
+      }, ACTIVITY_POLL_INTERVAL)
+    }
+    const handleVisibilityChange = () => schedule()
+
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    schedule()
+    return () => {
+      clearTimer()
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [query.cursor, user.id, user.role, user.status])
 
   function load(filters, cursor = null) {
     setPage(null)
@@ -66,8 +116,7 @@ export default function ActivityHistory({ user }) {
       {!loading && !error && page?.events.length === 0 && <p className="rounded-xl border border-dashed py-8 text-center text-sm text-gray-500">Nenhuma atividade encontrada para os filtros selecionados.</p>}
       <div className="space-y-3">{page?.events.map(event => {
         const date = new Date(event.occurred_at)
-        const role = event.actor_role === "admin" ? "Administrador" : "Funcionário"
-        const actor = event.actor_id === user.id ? user.name || "Você" : `${role} · ${String(event.actor_id).slice(0, 8)}`
+        const actor = activityActorLabel(event, user)
         const entity = { order: "Pedido", product: "Produto", profile: "Perfil" }[event.entity_type] || "Registro"
         return <article key={event.id} className="rounded-xl border border-gray-200 p-4">
           <div className="flex flex-wrap justify-between gap-2"><h3 className="font-medium text-gray-900">{ACTIVITY_ACTIONS[event.action] || "Atividade registrada"}</h3><time className="text-xs text-gray-500">{Number.isNaN(date.getTime()) ? "Data indisponível" : date.toLocaleString("pt-BR")}</time></div>

@@ -226,8 +226,28 @@ class ActivityLogsTests(unittest.TestCase):
         self.db.rpc.return_value.execute.return_value = SimpleNamespace(data=[row])
         response = self.get()
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(set(response.json()["events"][0]), set(row))
+        self.assertEqual(set(response.json()["events"][0]), set(row) | {"actor_name"})
+        self.assertIsNone(response.json()["events"][0]["actor_name"])
         self.assertEqual(row, original)
+
+    def test_actor_name_is_returned_when_the_read_rpc_has_a_matching_profile(self):
+        self.db.rpc.return_value.execute.return_value = SimpleNamespace(data=[
+            self.row(1, action="order.separation_completed", actor_name="Separation employee")
+        ])
+        response = self.get()
+        self.assertEqual(response.status_code, 200)
+        event = response.json()["events"][0]
+        self.assertEqual(event["action"], "order.separation_completed")
+        self.assertEqual(event["actor_name"], "Separation employee")
+        self.assertNotIn("email", event)
+
+    def test_unexpected_personal_fields_from_the_rpc_fail_closed(self):
+        self.db.rpc.return_value.execute.return_value = SimpleNamespace(data=[
+            self.row(1, actor_name="Employee", actor_email="unwanted@example.invalid")
+        ])
+        response = self.get()
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("unwanted@example.invalid", response.text)
 
 
 if __name__ == "__main__":

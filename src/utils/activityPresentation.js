@@ -9,6 +9,15 @@ export const ACTIVITY_ACTIONS = {
   "employee.deletion_requested": "Exclusão de funcionário solicitada", "employee.deleted": "Funcionário excluído",
   "employee.deletion_failed": "Exclusão de funcionário não realizada", "employee.deletion_outcome_unknown": "Exclusão de funcionário pendente de confirmação",
 }
+
+export function activityActorLabel(event, currentUser) {
+  const actorName = typeof event?.actor_name === "string" ? event.actor_name.trim() : ""
+  if (actorName) return actorName
+  if (event?.actor_id === currentUser?.id) return currentUser.name || "Você"
+  const role = event?.actor_role === "admin" ? "Administrador" : "Funcionário"
+  return `${role} · ${String(event?.actor_id || "").slice(0, 8)}`
+}
+
 const fields = {
   name: "Nome", supplier: "Fornecedor", customer: "Cliente", operation: "Operação", status: "Status",
   date: "Data", total: "Total", stock_applied: "Estoque aplicado", min: "Mínimo", max: "Máximo",

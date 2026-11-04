@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises"
 import { test } from "node:test"
 
 const presentation = await readFile(new URL("../src/utils/activityPresentation.js", import.meta.url), "utf8")
-const { ACTIVITY_ACTIONS, activityDetails, activityFilters } = await import(`data:text/javascript;base64,${Buffer.from(presentation).toString("base64")}`)
+const { ACTIVITY_ACTIONS, activityActorLabel, activityDetails, activityFilters } = await import(`data:text/javascript;base64,${Buffer.from(presentation).toString("base64")}`)
+const polling = await readFile(new URL("../src/utils/activityPolling.js", import.meta.url), "utf8")
+const { ACTIVITY_POLL_INTERVAL, shouldPollActivityPage } = await import(`data:text/javascript;base64,${Buffer.from(polling).toString("base64")}`)
 
 test("all audit actions have Portuguese descriptions", () => {
   assert.equal(Object.keys(ACTIVITY_ACTIONS).length, 19)
@@ -36,12 +38,27 @@ test("compensation distinguishes an unattempted reversal from an unknown outcome
   }
 })
 
+test("activity history prefers the returned profile name and falls back safely for historical actors", () => {
+  const currentUser = { id: "current", name: "Administrator" }
+  assert.equal(activityActorLabel({ actor_id: "employee", actor_role: "employee", actor_name: "Responsible employee" }, currentUser), "Responsible employee")
+  assert.equal(activityActorLabel({ actor_id: "current", actor_role: "admin", actor_name: null }, currentUser), "Administrator")
+  assert.equal(activityActorLabel({ actor_id: "deadbeef-1234", actor_role: "employee", actor_name: "   " }, currentUser), "Funcionário · deadbeef")
+})
+
 test("filters validate UUID and period, final day is inclusive in local time", () => {
   assert.throws(() => activityFilters({ user_id: "bad", start: "", end: "" }), /identificador/)
   assert.throws(() => activityFilters({ user_id: "", start: "2026-11-03", end: "2026-11-02" }), /data inicial/)
   const result = activityFilters({ user_id: "", action: "order.created", start: "2026-11-02", end: "2026-11-02" })
   assert.equal(result.date_from, new Date("2026-11-02T00:00:00").toISOString())
   assert.equal(result.date_to, new Date("2026-11-03T00:00:00").toISOString())
+})
+
+test("audit polling refreshes only the visible first page without concurrent requests", () => {
+  assert.equal(ACTIVITY_POLL_INTERVAL, 30_000)
+  assert.equal(shouldPollActivityPage({ cursor: null, hidden: false, inFlight: false }), true)
+  assert.equal(shouldPollActivityPage({ cursor: "older-page", hidden: false, inFlight: false }), false)
+  assert.equal(shouldPollActivityPage({ cursor: null, hidden: true, inFlight: false }), false)
+  assert.equal(shouldPollActivityPage({ cursor: null, hidden: false, inFlight: true }), false)
 })
 
 const backendSource = await readFile(new URL("../src/services/backend.js", import.meta.url), "utf8")
@@ -78,6 +95,12 @@ test("history integration preserves existing panels and resets ownership on acco
   assert.match(dashboard, /<OrderSeparationHistory orders=/)
   assert.match(dashboard, /!authLoading && currentUser\?\.role === "admin" && currentUser\?\.status === "active"/)
   assert.match(dashboard, /<ActivityHistory key=\{currentUser.id\}/)
-  assert.match(component, /alive = false; controller.abort\(\)/)
+  assert.match(component, /alive = false\s+controller\.abort\(\)/)
   assert.match(component, /load\(query.filters, page.next_cursor\)/)
+  assert.match(component, /activityActorLabel\(event, user\)/)
+  assert.match(component, /document\.addEventListener\("visibilitychange", handleVisibilityChange\)/)
+  assert.match(component, /document\.removeEventListener\("visibilitychange", handleVisibilityChange\)/)
+  assert.match(component, /ACTIVITY_POLL_INTERVAL/)
+  assert.match(component, /query\.cursor !== null/)
+  assert.match(component, /requestInFlight\.current/)
 })
