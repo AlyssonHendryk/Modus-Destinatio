@@ -282,6 +282,22 @@ export async function getAdminUsers(page = 1, perPage = 25) {
   }
 }
 
+export async function createAdminUser({ name, email, password, role }) {
+  if (!["admin", "employee"].includes(role)) throw new Error("Perfil inválido.")
+  return request("/api/admin/users", {
+    method: "POST", body: JSON.stringify({ name, email, password, role }),
+  })
+}
+
+export async function getAdminUserStats(signal) {
+  const result = await request("/api/admin/users/stats", { signal })
+  if (!result || !Number.isInteger(result.admins) || result.admins < 0 ||
+      !Number.isInteger(result.employees) || result.employees < 0) {
+    throw new Error("Não foi possível confirmar os indicadores de usuários.")
+  }
+  return { admins: result.admins, employees: result.employees }
+}
+
 export async function updateEmployeeStatus(userId, status) {
   if (!["active", "inactive"].includes(status)) {
     throw new Error("Status de funcion\u00e1rio inv\u00e1lido.")

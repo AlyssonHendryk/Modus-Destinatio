@@ -1,5 +1,32 @@
 "use client"
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { useApp } from "@/context/AppContext"
-export default function EsqueciSenha(){const[email,setEmail]=useState("");const[password,setPassword]=useState("");const[confirm,setConfirm]=useState("");const[msg,setMsg]=useState("");const[ok,setOk]=useState(false);const router=useRouter();const{resetPassword}=useApp();function submit(e){e.preventDefault();setOk(false);if(password.length<6)return setMsg("A nova senha deve ter ao menos 6 caracteres.");if(password!==confirm)return setMsg("As senhas não coincidem.");const r=resetPassword(email,password);if(!r.ok)return setMsg(r.message);setOk(true);setMsg("Senha redefinida no modo local. Você já pode entrar.")};return <div className="min-h-screen flex items-center justify-center bg-gradient-to-r from-purple-600 to-orange-500 p-4"><div className="bg-white rounded-2xl shadow-xl w-[400px] overflow-hidden"><div className="bg-gradient-to-r from-purple-600 to-orange-500 text-white text-center p-6"><h1 className="text-xl font-bold">Redefinir Senha</h1><p className="text-sm">Modo frontend/local</p></div><form onSubmit={submit} className="p-6 space-y-4"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="seu@email.com" className="w-full border rounded-xl p-3 text-gray-900"/><input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Nova senha" className="w-full border rounded-xl p-3 text-gray-900"/><input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} placeholder="Confirmar nova senha" className="w-full border rounded-xl p-3 text-gray-900"/>{msg&&<p className={`text-sm p-3 rounded-xl ${ok?"bg-green-50 text-green-700":"bg-red-50 text-red-700"}`}>{msg}</p>}<button className="w-full bg-purple-600 text-white py-3 rounded-xl">Redefinir senha</button><button type="button" onClick={()=>router.push("/login")} className="w-full text-sm text-gray-600">Voltar ao login</button><p className="text-xs text-gray-500">BACKEND PYTHON: no servidor, substitua este reset local por envio de token/link por e-mail.</p></form></div></div>}
+import { useRef, useState } from "react"
+import Link from "next/link"
+import { requestPasswordRecovery } from "@/services/passwordRecovery"
+
+export default function EsqueciSenha() {
+  const [email, setEmail] = useState("")
+  const [message, setMessage] = useState("")
+  const [sending, setSending] = useState(false)
+  const pending = useRef(false)
+  async function submit(event) {
+    event.preventDefault()
+    if (pending.current) return
+    pending.current = true
+    setSending(true)
+    try { setMessage(await requestPasswordRecovery(email, window.location.origin)) }
+    catch (failure) { setMessage(failure.message) }
+    finally { pending.current = false; setSending(false) }
+  }
+  return <main className="min-h-screen flex items-center justify-center bg-gradient-to-r from-purple-600 to-orange-500 p-4">
+    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+      <div className="bg-gradient-to-r from-purple-600 to-orange-500 text-white text-center p-6"><h1 className="text-xl font-bold">Recuperar senha</h1></div>
+      <form onSubmit={submit} className="p-6 space-y-4">
+        <label htmlFor="recovery-email" className="block text-sm text-gray-700">E-mail cadastrado</label>
+        <input id="recovery-email" type="email" required autoComplete="email" maxLength={254} disabled={sending} value={email} onChange={e => setEmail(e.target.value)} className="form-control w-full rounded-xl p-3" />
+        {message && <p role="status" className="text-sm text-gray-700">{message}</p>}
+        <button disabled={sending} className="w-full bg-purple-600 text-white py-3 rounded-xl">{sending ? "Enviando..." : "Enviar link de recuperação"}</button>
+        <Link href="/login" className="block text-center text-sm text-gray-600">Voltar ao login</Link>
+      </form>
+    </div>
+  </main>
+}

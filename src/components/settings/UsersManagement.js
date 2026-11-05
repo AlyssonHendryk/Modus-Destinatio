@@ -3,15 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { CheckCircle2, ChevronLeft, ChevronRight, Plus, Trash2, User, X } from "lucide-react"
 import { useApp } from "@/context/AppContext"
-import { createEmployee, deleteEmployee, getAdminUsers, updateEmployeeStatus } from "@/services/backend"
+import { createAdminUser, deleteEmployee, getAdminUsers, updateEmployeeStatus } from "@/services/backend"
 
-const EMPTY_FORM = { name: "", email: "", password: "" }
+const EMPTY_FORM = { name: "", email: "", password: "", role: "employee" }
 const USERS_PER_PAGE = 25
 
-export default function UsersManagement() {
+export default function UsersManagement({ onUsersChanged }) {
   const { currentUser } = useApp()
   const userId = currentUser?.id ?? null
-  const userType = currentUser?.type ?? null
+  const userType = currentUser?.status === "active" ? currentUser?.role : null
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
@@ -93,6 +93,7 @@ export default function UsersManagement() {
       deleteRequest.current += 1
       statusPending.current = false
       deletePending.current = false
+      authenticatedIdentity.current = { id: null, type: null }
     }
   }, [userId, userType, loadUsers])
 
@@ -128,14 +129,16 @@ export default function UsersManagement() {
     setSubmitting(true)
     setFormError("")
     try {
-      const employee = await createEmployee({ name, email, password: form.password })
+      const employee = await createAdminUser({ name, email, password: form.password, role: form.role })
       if (authenticatedIdentity.current.id !== userId || authenticatedIdentity.current.type !== "admin") return
-      setCreatedEmployee({ id: employee.id, name: employee.name, ownerId: userId })
+      setCreatedEmployee({ id: employee.id, name: employee.name, role: employee.role, ownerId: userId })
+      onUsersChanged?.()
       resetForm()
       setShowForm(false)
       await loadUsers(1)
     } catch (requestError) {
       // The service exposes only a sanitized server message.
+      if (authenticatedIdentity.current.id !== userId || authenticatedIdentity.current.type !== "admin") return
       setForm((current) => ({ ...current, password: "" }))
       setFormError(requestError?.message || "Não foi possível cadastrar o funcionário.")
     } finally {
@@ -164,6 +167,7 @@ export default function UsersManagement() {
       await updateEmployeeStatus(employee.id, nextStatus)
       if (requestId !== statusRequest.current || authenticatedIdentity.current.id !== userId ||
           authenticatedIdentity.current.type !== "admin") return
+      onUsersChanged?.()
       const refreshed = await loadUsers(page)
       if (refreshed && requestId === statusRequest.current && authenticatedIdentity.current.id === userId &&
           authenticatedIdentity.current.type === "admin") {
@@ -216,6 +220,7 @@ export default function UsersManagement() {
       await deleteEmployee(candidate.id)
       if (requestId !== deleteRequest.current || authenticatedIdentity.current.id !== userId ||
           authenticatedIdentity.current.type !== "admin") return
+      onUsersChanged?.()
       // Avoid an empty stale page after deleting its last confirmed record.
       const requestedPage = page > 1 && users.length === 1 ? page - 1 : page
       const refreshed = await loadUsers(requestedPage)
@@ -267,12 +272,18 @@ export default function UsersManagement() {
           <p className="text-sm text-gray-500">Contas reais vinculadas ao Supabase Auth.</p>
         </div>
         <button onClick={openCreate} disabled={submitting} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl disabled:opacity-60">
-          <Plus className="w-4 h-4" />Novo Funcionário
+          <Plus className="w-4 h-4" />Novo Usuário
         </button>
       </div>
 
       {showForm && formIsCurrent && (
         <form onSubmit={submit} className="p-5 bg-gray-50 border-b grid md:grid-cols-4 gap-3">
+          <div className="space-y-1">
+            <label htmlFor="new-user-role" className="block text-xs font-medium text-gray-700">Perfil</label>
+            <select id="new-user-role" value={form.role} disabled={submitting} onChange={event => setForm({ ...form, role: event.target.value })} className="form-control w-full rounded-lg p-2 text-gray-900">
+              <option value="employee">Funcionário</option><option value="admin">Administrador</option>
+            </select>
+          </div>
           <div className="space-y-1">
             <label htmlFor="employee-name" className="block text-xs font-medium text-gray-700">Nome completo</label>
             <input id="employee-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })}
@@ -290,7 +301,7 @@ export default function UsersManagement() {
           </div>
           <div className="flex gap-2">
             <button disabled={submitting} className="flex-1 bg-purple-600 text-white rounded-lg disabled:opacity-60">
-              {submitting ? "Cadastrando..." : "Cadastrar funcionário"}
+              {submitting ? "Cadastrando..." : "Cadastrar usuário"}
             </button>
             <button type="button" onClick={closeForm} disabled={submitting} aria-label="Fechar formulário"
               className="p-2 border rounded-lg disabled:opacity-50"><X className="w-4 h-4" /></button>
@@ -301,8 +312,8 @@ export default function UsersManagement() {
 
       {creationIsCurrent && (
         <div className="m-5 p-4 rounded-xl border border-green-200 bg-green-50 text-green-900" role="status">
-          <div className="flex items-center gap-2 font-medium"><CheckCircle2 className="w-4 h-4" />Funcionário cadastrado com sucesso</div>
-          <p className="mt-1 text-sm">{createdEmployee.name} — funcionário ativo.</p>
+          <div className="flex items-center gap-2 font-medium"><CheckCircle2 className="w-4 h-4" />Usuário cadastrado com sucesso</div>
+          <p className="mt-1 text-sm">{createdEmployee.name} — {createdEmployee.role === "admin" ? "administrador" : "funcionário"} ativo.</p>
         </div>
       )}
 

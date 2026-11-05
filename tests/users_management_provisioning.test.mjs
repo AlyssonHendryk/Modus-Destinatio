@@ -5,13 +5,14 @@ import { test } from 'node:test'
 const source = await readFile(new URL('../src/components/settings/UsersManagement.js', import.meta.url), 'utf8')
 const contextSource = await readFile(new URL('../src/context/AppContext.js', import.meta.url), 'utf8')
 
-test('user management has an employee-only remote creation flow and no default password', () => {
-  assert.match(source, /createEmployee\(\{ name, email, password: form\.password \}\)/)
-  assert.match(source, /Novo Funcionário/)
+test('user management creates accounts through the authorized API with an explicit role and no default password', () => {
+  assert.match(source, /createAdminUser\(\{ name, email, password: form\.password, role: form\.role \}\)/)
+  assert.match(source, /Novo Usuário/)
   assert.match(source, /type="password"/)
   assert.match(source, /autoComplete="new-password"/)
   assert.doesNotMatch(source, /saveUser|updateUser|deleteUser|openEdit/)
-  assert.doesNotMatch(source, /<select|value="admin"|role:|status:/)
+  assert.match(source, /value="employee"/)
+  assert.match(source, /value="admin"/)
   assert.doesNotMatch(source, /123456/)
 })
 

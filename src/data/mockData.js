@@ -69,19 +69,6 @@ export const initialInventory = [
   { id: "P005", name: "Coca Cola Lata", quantity: 120, max: 200, min: 40, unitPrice: 4.99, active: true },
 ]
 
-export const initialUsers = [
-  {
-    id: "U001",
-    name: "Bruno Silva",
-    email: "bruno@modusdestinatio.com",
-    phone: "(11) 99999-9999",
-    role: "Administrador",
-    type: "admin",
-    status: "active",
-    password: "123456",
-  },
-]
-
 export const initialTasks = [
   { id: "T001", title: "Conferir pedidos pendentes", done: false },
   { id: "T002", title: "Revisar itens com estoque baixo", done: false },

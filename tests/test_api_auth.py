@@ -70,12 +70,12 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.audit_request_ids.add(request_id)
         self.assertEqual(actual, {**parameters, "p_actor_id": self.user_id, "p_request_id": request_id})
 
-    def assert_auth_audit(self, operation, outcome, **metadata):
+    def assert_auth_audit(self, operation, outcome, *, admin_creation=False, **metadata):
         rpc_calls = self.profile_client.rpc.call_args_list
         self.assertEqual(len(rpc_calls), 2)
         intent_name, intent = rpc_calls[0].args
         result_name, result = rpc_calls[1].args
-        self.assertEqual(intent_name, f"audit_employee_{operation}_requested")
+        self.assertEqual(intent_name, "audit_admin_creation_requested" if admin_creation else f"audit_employee_{operation}_requested")
         self.assertEqual(result_name, f"audit_employee_{operation}_result")
         request_id = intent["p_request_id"]
         self.assertEqual(str(UUID(request_id)), request_id)
@@ -120,7 +120,7 @@ class ApiAuthenticationTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 401)
                     self.assertEqual(response.headers["www-authenticate"], "Bearer")
                 count += 1
-        self.assertEqual(count, 17)
+        self.assertEqual(count, 18)
         self.profile_client.assert_not_called()
         self.assertEqual(self.profile_client.mock_calls, [])
 
@@ -818,6 +818,108 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.profile_client.assert_not_called()
 
+    def test_admin_creation_requires_committed_explicit_audit_and_preserves_session(self):
+        self.prepare_employee_creation()
+        profile = {"id": self.new_employee_id, "name": "Funcionário de teste", "role": "admin", "status": "active"}
+        self.profile_client.rpc.return_value.execute.side_effect = [
+            SimpleNamespace(data=1), SimpleNamespace(data=[profile]), SimpleNamespace(data=2),
+        ]
+        payload = self.employee_payload(role="admin")
+        response = self.create_employee_request(payload)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["role"], "admin")
+        first_call = self.profile_client.rpc.call_args_list[0]
+        self.assertEqual(first_call.args[0], "audit_admin_creation_requested")
+        self.assertEqual(first_call.args[1]["p_actor_id"], self.user_id)
+        self.query.insert.assert_not_called()
+        calls = self.profile_client.rpc.call_args_list
+        self.assertEqual([c.args[0] for c in calls], [
+            "audit_admin_creation_requested", "audit_complete_admin_creation", "audit_employee_creation_result",
+        ])
+        self.assertEqual(calls[1].args[1], {
+            **first_call.args[1], "p_user_id": self.new_employee_id, "p_name": payload["name"],
+        })
+        self.assertEqual(calls[2].args[1], {**first_call.args[1], "p_user_id": self.new_employee_id, "p_outcome": "succeeded"})
+        self.profile_client.auth.sign_in_with_password.assert_not_called()
+        self.profile_client.auth.set_session.assert_not_called()
+
+    def test_admin_creation_stops_before_auth_if_new_sql_audit_is_unavailable(self):
+        self.prepare_employee_creation()
+        self.profile_client.rpc.return_value.execute.side_effect = RuntimeError("internal detail")
+        response = self.create_employee_request(self.employee_payload(role="admin"))
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("internal detail", response.text)
+        self.profile_client.auth.admin.create_user.assert_not_called()
+        self.query.insert.assert_not_called()
+
+    def test_admin_creation_duplicate_email_never_changes_an_existing_account(self):
+        self.prepare_employee_creation()
+        self.profile_client.auth.admin.create_user.side_effect = AuthApiError("private provider data", 422, "email_exists")
+        response = self.create_employee_request(self.employee_payload(role="admin"))
+        self.assertEqual(response.status_code, 409)
+        self.assertNotIn("private provider", response.text)
+        self.query.insert.assert_not_called()
+        self.profile_client.auth.admin.delete_user.assert_not_called()
+        self.assert_auth_audit("creation", "failed", admin_creation=True, p_stage="auth_create", p_reason_code="account_exists")
+
+    def test_admin_profile_failure_only_compensates_the_proven_new_uuid(self):
+        self.prepare_employee_creation()
+        self.profile_client.rpc.return_value.execute.side_effect = [SimpleNamespace(data=1), RuntimeError("private SQL"), SimpleNamespace(data=2)]
+        self.result.side_effect = [
+            SimpleNamespace(data=[{"id": self.user_id, "role": "admin", "status": "active"}]),
+            SimpleNamespace(data=[]), SimpleNamespace(data=[]),
+        ]
+        payload = self.employee_payload(role="admin")
+        with self.assertLogs("admin_users", level="WARNING") as logs:
+            response = self.create_employee_request(payload)
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn(payload["password"], response.text + str(logs.output))
+        self.assertNotIn("private SQL", response.text + str(logs.output))
+        self.profile_client.auth.admin.delete_user.assert_called_once_with(self.new_employee_id)
+        self.assertEqual(self.profile_client.rpc.call_args.args[1]["p_outcome"], "failed")
+
+    def test_admin_creation_cannot_be_called_by_employee_inactive_or_anonymous(self):
+        for role, status in [("employee", "active"), ("admin", "inactive")]:
+            self.set_profile(role, status)
+            response = self.create_employee_request(self.employee_payload(role="admin"))
+            self.assertEqual(response.status_code, 403)
+            self.profile_client.auth.admin.create_user.assert_not_called()
+            self.profile_client.rpc.assert_not_called()
+        response = self.client.post("/api/admin/users", json=self.employee_payload(role="admin"))
+        self.assertEqual(response.status_code, 401)
+
+    def test_user_stats_counts_active_profiles_without_auth_or_personal_fields(self):
+        self.set_profile("admin")
+        rows = {
+            "a": {"role": "admin", "status": "active"},
+            "b": {"role": "admin", "status": "inactive"},
+            "c": {"role": "employee", "status": "active"},
+            "d": {"role": "employee", "status": "active"},
+        }
+        with patch("admin_users.profiles_by_id", return_value=rows):
+            response = self.client.get("/api/admin/users/stats", headers={"Authorization": "Bearer " + self.token()})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"admins": 1, "employees": 2})
+        self.profile_client.auth.admin.list_users.assert_not_called()
+
+    def test_user_stats_denies_employee_and_sanitizes_database_failure(self):
+        self.set_profile("employee")
+        with patch("admin_users.profiles_by_id") as read:
+            response = self.client.get("/api/admin/users/stats", headers={"Authorization": "Bearer " + self.token()})
+            self.assertEqual(response.status_code, 403)
+            read.assert_not_called()
+        self.set_profile("admin")
+        with patch("admin_users.profiles_by_id", side_effect=RuntimeError("private profile")):
+            response = self.client.get("/api/admin/users/stats", headers={"Authorization": "Bearer " + self.token()})
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("private profile", response.text)
+
+    def test_role_selection_does_not_create_role_update_endpoint_or_allow_self_target(self):
+        self.prepare_employee_creation()
+        response = self.create_employee_request(self.employee_payload(role="admin", id=self.user_id))
+        self.assertEqual(response.status_code, 422)
+        self.profile_client.auth.admin.create_user.assert_not_called()
+
     def status_request(self, user_id, payload=None, token=None):
         return self.client.patch(
             f"/api/admin/users/{user_id}/status",
@@ -1030,7 +1132,7 @@ class ApiAuthenticationTests(unittest.TestCase):
 
     def test_employee_creation_rejects_forbidden_and_invalid_input_without_echoing_password(self):
         invalid_payloads = [
-            self.employee_payload(role="admin"),
+            self.employee_payload(role="superadmin"),
             self.employee_payload(status="active"),
             self.employee_payload(id=self.new_employee_id if hasattr(self, "new_employee_id") else self.user_id),
             self.employee_payload(extra="not allowed"),

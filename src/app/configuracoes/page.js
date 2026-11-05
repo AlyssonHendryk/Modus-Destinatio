@@ -1,7 +1,7 @@
 
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useApp } from "@/context/AppContext"
 
@@ -22,8 +22,8 @@ export default function ConfiguracoesPage() {
     authLoading,
     currentUser,
     saveProfileName,
-    users,
   } = useApp()
+  const [usersRevision, setUsersRevision] = useState(0)
 
   // ============================================================
   // VERIFICAÇÃO DE AUTENTICAÇÃO
@@ -45,13 +45,6 @@ export default function ConfiguracoesPage() {
   // ALTERAÇÃO DE SENHA
   // ============================================================
 
-  function updatePassword() {
-    alert(
-      "A alteração de senha será disponibilizada após a integração com o Supabase Auth."
-    )
-
-    return false
-  }
 
   // ============================================================
   // EXCLUSÃO DE CONTA
@@ -96,7 +89,7 @@ export default function ConfiguracoesPage() {
         description="Gerencie conta, usuários, segurança e preferências."
       />
 
-      <SettingsStats users={users} />
+      <SettingsStats key={`${currentUser.id}:${currentUser.role}`} user={currentUser} revision={usersRevision} onRetry={() => setUsersRevision(value => value + 1)} />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <ProfileSection
@@ -105,9 +98,7 @@ export default function ConfiguracoesPage() {
           onSaveName={saveProfileName}
         />
 
-        <SecuritySection
-          onUpdatePassword={updatePassword}
-        />
+        <SecuritySection />
       </div>
 
       <PermissionsSection
@@ -115,7 +106,7 @@ export default function ConfiguracoesPage() {
       />
 
       {currentUser.type === "admin" && (
-        <UsersManagement />
+        <UsersManagement key={currentUser.id} onUsersChanged={() => setUsersRevision(value => value + 1)} />
       )}
 
       <SystemPreferences />

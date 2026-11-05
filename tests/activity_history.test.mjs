@@ -9,7 +9,7 @@ const { ACTIVITY_POLL_INTERVAL, shouldPollActivityPage } = await import(`data:te
 
 test("all audit actions have Portuguese descriptions", () => {
   assert.equal(Object.keys(ACTIVITY_ACTIONS).length, 19)
-  assert.equal(ACTIVITY_ACTIONS["employee.creation_outcome_unknown"], "Criação de funcionário pendente de confirmação")
+  assert.equal(ACTIVITY_ACTIONS["employee.creation_outcome_unknown"], "Criação de conta pendente de confirmação")
 })
 
 test("details display allowed changes without arbitrary or nested secrets", () => {

@@ -97,6 +97,31 @@ test('employee provisioning sends only employee fields with the current Bearer t
   assert.deepEqual(session, { access_token: token })
 })
 
+test('admin provisioning sends explicit allowlisted role with Bearer and preserves session', async () => {
+  session = { access_token: token }
+  globalThis.fetch = async (url, options) => {
+    assert.ok(url.endsWith('/api/admin/users'))
+    assert.equal(options.headers.Authorization, `Bearer ${token}`)
+    assert.deepEqual(JSON.parse(options.body), { name: 'Admin Test', email: 'test@example.test', password: 'mock-password', role: 'admin' })
+    return new Response(JSON.stringify({ id: 'test-id', name: 'Admin Test', role: 'admin', status: 'active' }), { status: 201 })
+  }
+  assert.equal((await backend.createAdminUser({ name: 'Admin Test', email: 'test@example.test', password: 'mock-password', role: 'admin', status: 'inactive' })).role, 'admin')
+  assert.deepEqual(session, { access_token: token })
+  await assert.rejects(backend.createAdminUser({ role: 'superadmin' }), /inválido/)
+})
+
+test('user indicators validate exact aggregate counts without exposing directory data', async () => {
+  session = { access_token: token }
+  globalThis.fetch = async (url, options) => {
+    assert.ok(url.endsWith('/api/admin/users/stats'))
+    assert.equal(options.headers.Authorization, `Bearer ${token}`)
+    return new Response(JSON.stringify({ admins: 0, employees: 2, internal: 'discard' }), { status: 200 })
+  }
+  assert.deepEqual(await backend.getAdminUserStats(), { admins: 0, employees: 2 })
+  globalThis.fetch = async () => new Response(JSON.stringify({ admins: -1, employees: 2 }))
+  await assert.rejects(backend.getAdminUserStats(), /indicadores/)
+})
+
 test('employee provisioning propagates authentication and validation failures without retrying', async t => {
   t.mock.method(console, 'error', () => {})
   session = { access_token: token }

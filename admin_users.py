@@ -38,6 +38,7 @@ class EmployeeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120, strict=True)
     email: str = Field(min_length=3, max_length=254, strict=True)
     password: SecretStr = Field(min_length=8, max_length=128)
+    role: Literal["employee", "admin"] = "employee"
 
     @field_validator("name")
     @classmethod
@@ -97,6 +98,13 @@ class AdminUsersPage(BaseModel):
     page: int
     per_page: int
     total: int
+
+
+class AdminUserStats(BaseModel):
+    admins: int
+    employees: int
+
+
 
 
 class EmployeeStatusUpdate(BaseModel):
@@ -248,6 +256,19 @@ def profiles_by_id(client):
         if len(rows) < AUTH_SCAN_PAGE_SIZE:
             return profiles
         offset += AUTH_SCAN_PAGE_SIZE
+
+
+@router.get("/users/stats", response_model=AdminUserStats)
+def user_stats(request: Request, actor: AuthenticatedUser = Depends(require_admin)):
+    """Count validated real profiles; never scan Auth emails for indicators."""
+    try:
+        profiles = profiles_by_id(request.app.state.profile_client)
+        return AdminUserStats(
+            admins=sum(p["role"] == "admin" and p["status"] == "active" for p in profiles.values()),
+            employees=sum(p["role"] == "employee" and p["status"] == "active" for p in profiles.values()),
+        )
+    except Exception:
+        raise HTTPException(503, "Não foi possível consultar os indicadores de usuários.") from None
 
 
 @router.get("/users", response_model=AdminUsersPage)
@@ -444,7 +465,8 @@ def create_employee(body: EmployeeCreate, request: Request,
                     actor: AuthenticatedUser = Depends(require_admin)):
     client = request.app.state.profile_client
     audit = {"p_actor_id": actor.id, "p_request_id": str(uuid4())}
-    record_auth_audit(client, "audit_employee_creation_requested", audit,
+    intent_rpc = "audit_admin_creation_requested" if body.role == "admin" else "audit_employee_creation_requested"
+    record_auth_audit(client, intent_rpc, audit,
                       required=True, intent=True)
     try:
         result = client.auth.admin.create_user({
@@ -507,9 +529,19 @@ def create_employee(body: EmployeeCreate, request: Request,
         })
         raise HTTPException(500, "Não foi possível concluir o cadastro do funcionário.")
 
-    profile = {"id": user_id, "name": body.name, "role": "employee", "status": "active"}
+    # The caller's validated profile authorizes role selection for a NEW UUID
+    # only. No endpoint accepts a role update for an existing user.
+    profile = {"id": user_id, "name": body.name, "role": body.role, "status": "active"}
     try:
-        rows = client.schema("public").table("profiles").insert(profile).execute().data
+        if body.role == "admin":
+            # Recheck the active actor and commit the new admin profile + audit
+            # atomically. A role/status change during the Auth HTTP call cannot
+            # leave an unapproved active administrator in profiles.
+            rows = client.rpc("audit_complete_admin_creation", {
+                **audit, "p_user_id": user_id, "p_name": body.name,
+            }).execute().data
+        else:
+            rows = client.schema("public").table("profiles").insert(profile).execute().data
         if not isinstance(rows, list) or len(rows) != 1 or any(rows[0].get(key) != value for key, value in profile.items()):
             raise ValueError("Invalid profile creation response")
     except Exception:

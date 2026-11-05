@@ -4,8 +4,8 @@ export const ACTIVITY_ACTIONS = {
   "product.created": "Produto criado", "product.updated": "Produto atualizado", "product.deleted": "Produto excluído",
   "stock.adjusted": "Estoque ajustado", "profile.name_updated": "Nome atualizado",
   "employee.status_updated": "Status do funcionário atualizado",
-  "employee.creation_requested": "Criação de funcionário solicitada", "employee.created": "Funcionário criado",
-  "employee.creation_failed": "Criação de funcionário não realizada", "employee.creation_outcome_unknown": "Criação de funcionário pendente de confirmação",
+  "employee.creation_requested": "Criação de conta solicitada", "employee.created": "Conta criada",
+  "employee.creation_failed": "Criação de conta não realizada", "employee.creation_outcome_unknown": "Criação de conta pendente de confirmação",
   "employee.deletion_requested": "Exclusão de funcionário solicitada", "employee.deleted": "Funcionário excluído",
   "employee.deletion_failed": "Exclusão de funcionário não realizada", "employee.deletion_outcome_unknown": "Exclusão de funcionário pendente de confirmação",
 }
@@ -19,7 +19,7 @@ export function activityActorLabel(event, currentUser) {
 }
 
 const fields = {
-  name: "Nome", supplier: "Fornecedor", customer: "Cliente", operation: "Operação", status: "Status",
+  name: "Nome", role: "Perfil", supplier: "Fornecedor", customer: "Cliente", operation: "Operação", status: "Status",
   date: "Data", total: "Total", stock_applied: "Estoque aplicado", min: "Mínimo", max: "Máximo",
   unit_price: "Preço unitário", active: "Ativo", quantity: "Quantidade", initial_quantity: "Quantidade inicial",
   item_count: "Itens", delta: "Ajuste", previous_quantity: "Quantidade anterior", new_quantity: "Nova quantidade",
@@ -29,6 +29,7 @@ const statuses = { active: "Ativo", inactive: "Inativo", waiting: "Aguardando", 
 function valueText(key, value) {
   if (value === null) return "Não informado"
   if (typeof value === "boolean") return value ? "Sim" : "Não"
+  if (key === "role") return value === "admin" ? "Administrador" : value === "employee" ? "Funcionário" : "Não informado"
   if (!["string", "number"].includes(typeof value)) return "—"
   if (["status", "previous_status", "new_status"].includes(key)) return statuses[value] || "Não informado"
   if (["total", "unit_price"].includes(key) && Number.isFinite(Number(value))) {
