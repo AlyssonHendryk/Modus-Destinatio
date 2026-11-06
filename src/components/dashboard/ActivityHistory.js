@@ -6,7 +6,7 @@ import { ACTIVITY_ACTIONS, activityActorLabel, activityDetails, activityFilters 
 import { ACTIVITY_POLL_INTERVAL, shouldPollActivityPage } from "@/utils/activityPolling"
 
 const EMPTY = { user_id: "", action: "", start: "", end: "" }
-const control = "form-control h-11 w-full rounded-lg px-3 text-sm text-gray-900"
+const control = "form-control h-11 min-w-0 w-full rounded-lg px-3 text-sm text-gray-900"
 const button = "rounded-lg border border-purple-200 px-4 py-2 text-sm text-purple-700 hover:bg-purple-50 disabled:opacity-50"
 
 export default function ActivityHistory({ user }) {
@@ -120,9 +120,9 @@ export default function ActivityHistory({ user }) {
         const entity = { order: "Pedido", product: "Produto", profile: "Perfil" }[event.entity_type] || "Registro"
         return <article key={event.id} className="rounded-xl border border-gray-200 p-4">
           <div className="flex flex-wrap justify-between gap-2"><h3 className="font-medium text-gray-900">{ACTIVITY_ACTIONS[event.action] || "Atividade registrada"}</h3><time className="text-xs text-gray-500">{Number.isNaN(date.getTime()) ? "Data indisponível" : date.toLocaleString("pt-BR")}</time></div>
-          <p className="mt-1 break-words text-sm text-gray-600">Responsável: {actor}</p>
-          <p className="break-words text-sm text-gray-600">{entity}{event.entity_id ? ` · ${event.entity_id}` : " · Identificação ainda não disponível"}</p>
-          <ul className="mt-2 space-y-1 text-sm text-gray-600">{activityDetails(event).map((line, index) => <li key={index} className="break-words">{line}</li>)}</ul>
+          <p className="mt-1 [overflow-wrap:anywhere] text-sm text-gray-600">Responsável: {actor}</p>
+          <p className="[overflow-wrap:anywhere] text-sm text-gray-600">{entity}{event.entity_id ? ` · ${event.entity_id}` : " · Identificação ainda não disponível"}</p>
+          <ul className="mt-2 space-y-1 text-sm text-gray-600">{activityDetails(event).map((line, index) => <li key={index} className="[overflow-wrap:anywhere]">{line}</li>)}</ul>
         </article>
       })}</div>
     </div>

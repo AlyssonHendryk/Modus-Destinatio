@@ -8,5 +8,5 @@ export function OrdersStats({ orders = [] }) {
     { label: "Cancelados", value: orders.filter(o => o.status === "cancelled").length, icon: XCircle, color: "text-red-600", bg: "bg-red-50 border-red-200" },
     { label: "Aguardando", value: orders.filter(o => o.status === "waiting").length, icon: Clock, color: "text-purple-600", bg: "bg-purple-50 border-purple-200" },
   ]
-  return <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">{stats.map(s => { const Icon=s.icon; return <div key={s.label} className={`${s.bg} border rounded-xl p-4 flex items-center gap-3`}><Icon className={`w-5 h-5 ${s.color}`} /><div><p className="text-sm text-gray-600">{s.label}</p><p className={`text-2xl font-semibold ${s.color}`}>{s.value}</p></div></div> })}</div>
+  return <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">{stats.map(s => { const Icon=s.icon; return <div key={s.label} className={`${s.bg} min-w-0 border rounded-xl p-4 flex items-center gap-3`}><Icon className={`w-5 h-5 ${s.color}`} /><div className="min-w-0"><p className="text-sm text-gray-600">{s.label}</p><p className={`text-2xl font-semibold ${s.color}`}>{s.value}</p></div></div> })}</div>
 }

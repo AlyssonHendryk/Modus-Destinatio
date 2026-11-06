@@ -55,8 +55,8 @@ export default function ResetPassword() {
       busy.current = false
     }
   }
-  return <main className="min-h-screen flex items-center justify-center bg-gradient-to-r from-purple-600 to-orange-500 p-4">
-    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+  return <main className="min-h-dvh flex flex-col bg-gradient-to-r from-purple-600 to-orange-500 p-4">
+    <div className="mx-auto my-auto bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
       <h1 className="text-xl font-bold text-gray-900">Redefinir senha</h1>
       {!ready && !error && !saved && <p role="status">Validando link...</p>}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}

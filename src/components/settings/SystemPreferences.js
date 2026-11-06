@@ -144,7 +144,7 @@ function PreferencesForm({ preferences, updatePreferences, persistPreferences })
                 <button
                   type="button"
                   onClick={() => toggleNotification(item.key)}
-                  className={`relative w-12 h-6 rounded-full transition-all cursor-pointer ${
+                  className={`relative w-12 h-6 shrink-0 rounded-full transition-all cursor-pointer ${
                     notifications[item.key]
                       ? "bg-gradient-to-r from-purple-500 to-purple-600"
                       : "bg-gray-300"
@@ -172,7 +172,7 @@ function PreferencesForm({ preferences, updatePreferences, persistPreferences })
         )}
 
         {/* Botões */}
-        <div className="flex gap-3 pt-2">
+        <div className="flex flex-col gap-3 pt-2 sm:flex-row">
           <button
             onClick={handleSave}
             className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-medium shadow-lg transition-all cursor-pointer"

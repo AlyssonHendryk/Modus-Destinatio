@@ -1,7 +1,7 @@
 
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useApp } from "@/context/AppContext"
 import { canViewFinancials } from "@/utils/financialPresentation"
@@ -36,6 +36,9 @@ export default function Dashboard({ initialTab = "dashboard" }) {
   const {
     authLoading,
     currentUser,
+    backendError,
+    ordersLoading,
+    hydrated,
     orders,
     inventory,
     saveOrder,
@@ -43,12 +46,16 @@ export default function Dashboard({ initialTab = "dashboard" }) {
     updateOrderStatus,
   } = useApp()
   const isAdmin = canViewFinancials(currentUser)
+  const dataLoading = ordersLoading || (!hydrated && !backendError)
+  const dataReady = hydrated && !ordersLoading
 
   const [activeTab, setActiveTab] = useState(initialTab)
   const [search, setSearch] = useState("")
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingOrder, setEditingOrder] = useState(null)
   const [separationFilter, setSeparationFilter] = useState("all")
+  const [navigationOpen, setNavigationOpen] = useState(false)
+  const closeNavigation = useCallback(() => setNavigationOpen(false), [])
 
   // ============================================================
   // VERIFICAÇÃO DE AUTENTICAÇÃO
@@ -161,24 +168,32 @@ export default function Dashboard({ initialTab = "dashboard" }) {
   // ============================================================
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="flex h-dvh w-full bg-gray-50 overflow-hidden">
       <Sidebar
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        mobileOpen={navigationOpen}
+        onClose={closeNavigation}
       />
 
       <div className="min-w-0 flex-1 flex flex-col overflow-hidden">
         <TopBar
           search={search}
           onSearchChange={setSearch}
+          navigationOpen={navigationOpen}
+          onOpenNavigation={() => setNavigationOpen(true)}
         />
 
         <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-8">
+          {dataLoading && <p role="status" className="text-sm text-gray-600">Carregando dados operacionais...</p>}
+          {backendError && <p role="alert" className="mb-4 text-sm text-red-700">{hydrated
+            ? "Não foi possível concluir uma operação. Os dados exibidos podem estar desatualizados."
+            : "Não foi possível carregar os dados operacionais. Atualize a página para tentar novamente."}</p>}
           {/* ==================================================
               DASHBOARD PRINCIPAL
           ================================================== */}
 
-          {activeTab === "dashboard" && (
+          {dataReady && activeTab === "dashboard" && (
             <div className="max-w-[1600px] mx-auto space-y-6">
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 mb-1">
@@ -221,7 +236,7 @@ export default function Dashboard({ initialTab = "dashboard" }) {
               PEDIDOS
           ================================================== */}
 
-          {activeTab === "pedidos" && (
+          {dataReady && activeTab === "pedidos" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full">
               <OrdersHeader onNewOrderClick={openCreate} />
 
@@ -238,7 +253,7 @@ export default function Dashboard({ initialTab = "dashboard" }) {
               ESTOQUE
           ================================================== */}
 
-          {activeTab === "estoque" && (
+          {dataReady && activeTab === "estoque" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full">
               <div>
                 <h1 className="text-3xl font-bold text-gray-900 mb-1">
@@ -260,7 +275,7 @@ export default function Dashboard({ initialTab = "dashboard" }) {
               SEPARAÇÃO DE PEDIDOS
           ================================================== */}
 
-          {activeTab === "separar" && (
+          {dataReady && activeTab === "separar" && (
             <div className="max-w-[1600px] mx-auto space-y-6 w-full">
               <OrderSeparationHeader pendingCount={activeSeparationOrders.filter((order) => order.status === "waiting").length} />
 
@@ -284,8 +299,10 @@ export default function Dashboard({ initialTab = "dashboard" }) {
                 <h1 className="text-3xl font-bold text-gray-900">Histórico</h1>
                 <p className="mt-1 text-gray-500">Consulte as movimentações de estoque e os pedidos históricos carregados.</p>
               </header>
-              <StockMovementHistory />
-              <OrderSeparationHistory orders={splitSeparationOrders(orders).history} />
+              {dataReady && <>
+                <StockMovementHistory />
+                <OrderSeparationHistory orders={splitSeparationOrders(orders).history} />
+              </>}
               {!authLoading && currentUser?.role === "admin" && currentUser?.status === "active" && (
                 <ActivityHistory key={currentUser.id} user={currentUser} />
               )}

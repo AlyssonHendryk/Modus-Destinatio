@@ -62,7 +62,7 @@ export default function ProfileSection({ currentUser, onSaveName }) {
       {/* Banner */}
       <div className="bg-gradient-to-r from-purple-500 via-purple-400 to-orange-400 h-24" />
 
-      <div className="px-8 pb-8">
+      <div className="min-w-0 px-4 pb-6 sm:px-8 sm:pb-8">
         {/* Perfil */}
         <div className="flex flex-col xl:flex-row xl:items-start gap-6 -mt-16 mb-6">
           <div className="relative">
@@ -71,8 +71,8 @@ export default function ProfileSection({ currentUser, onSaveName }) {
             </div>
           </div>
 
-          <div className="flex-1 xl:pt-16">
-            <h2 className="text-2xl font-bold text-gray-900 mb-1">
+          <div className="min-w-0 flex-1 xl:pt-16">
+            <h2 className="text-2xl font-bold text-gray-900 mb-1 [overflow-wrap:anywhere]">
               {currentUser?.name}
             </h2>
             <p className="text-gray-600 font-medium">
@@ -135,7 +135,7 @@ export default function ProfileSection({ currentUser, onSaveName }) {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex flex-col justify-end gap-2 pt-2 sm:flex-row">
               <button
                 type="button"
                 onClick={cancelEditing}
@@ -156,23 +156,23 @@ export default function ProfileSection({ currentUser, onSaveName }) {
         ) : (
           /* Informações Exibidas em Modo de Visualização normal */
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+            <div className="flex min-w-0 items-start gap-3 p-4 bg-gray-50 rounded-xl">
+              <div className="w-10 h-10 shrink-0 bg-blue-100 rounded-lg flex items-center justify-center">
                 <Mail className="w-5 h-5 text-blue-600" />
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-xs text-gray-500 mb-1">E-mail</p>
-                <p className="text-sm font-medium text-gray-900 truncate max-w-[200px] sm:max-w-none">
+                <p className="text-sm font-medium text-gray-900 truncate">
                   {currentUser?.email}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+            <div className="flex min-w-0 items-start gap-3 p-4 bg-gray-50 rounded-xl">
+              <div className="w-10 h-10 shrink-0 bg-green-100 rounded-lg flex items-center justify-center">
                 <Phone className="w-5 h-5 text-green-600" />
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-xs text-gray-500 mb-1">Telefone</p>
                 <p className="text-sm font-medium text-gray-900">
                   {currentUser?.phone}
@@ -180,21 +180,21 @@ export default function ProfileSection({ currentUser, onSaveName }) {
               </div>
             </div>
 
-            <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+            <div className="flex min-w-0 items-start gap-3 p-4 bg-gray-50 rounded-xl">
+              <div className="w-10 h-10 shrink-0 bg-purple-100 rounded-lg flex items-center justify-center">
                 <Calendar className="w-5 h-5 text-purple-600" />
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-xs text-gray-500 mb-1">Data de Cadastro</p>
                 <p className="text-sm font-medium text-gray-900">15 de Janeiro, 2024</p>
               </div>
             </div>
 
-            <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-              <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
+            <div className="flex min-w-0 items-start gap-3 p-4 bg-gray-50 rounded-xl">
+              <div className="w-10 h-10 shrink-0 bg-orange-100 rounded-lg flex items-center justify-center">
                 <Calendar className="w-5 h-5 text-orange-600" />
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-xs text-gray-500 mb-1">Último Acesso</p>
                 <p className="text-sm font-medium text-gray-900">Hoje, 14:23</p>
               </div>

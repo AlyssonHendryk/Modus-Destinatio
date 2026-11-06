@@ -1,5 +1,6 @@
 "use client"
 import { supabase } from "@/lib/supabase"
+import { getMfaRequirement, verifyMfaChallenge, discardStaleMfaSession } from "@/services/mfa"
 import {
   createContext,
   useCallback,
@@ -8,10 +9,6 @@ import {
   useRef,
   useState,
 } from "react"
-
-import {
-  initialTasks,
-} from "@/data/mockData"
 
 import { normalizeOrder, parseCurrency } from "@/utils/formatters"
 import {
@@ -67,6 +64,9 @@ export function AppProvider({ children }) {
     setAuthUser,
   ] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [mfaPending, setMfaPending] = useState(null)
+  const pendingMfaIdentity = useRef(null)
+  const verifyingMfa = useRef(false)
   const [ordersLoading, setOrdersLoading] = useState(false)
   const [backendError, setBackendError] = useState(null)
   const [stockMovements, setStockMovements] = useState([])
@@ -82,6 +82,8 @@ export function AppProvider({ children }) {
   const preferencesOwner = useRef(null)
 
   const applyAuthUser = useCallback((user) => {
+    pendingMfaIdentity.current = null
+    setMfaPending(null)
     const owner = user?.id ?? null
     if (preferencesOwner.current !== owner || !user) {
       const loaded = loadUserPreferences(preferencesStorage(), owner)
@@ -110,6 +112,12 @@ export function AppProvider({ children }) {
     setAuthUser(user)
     setAuthLoading(false)
   }, [])
+
+  const applyPendingMfa = useCallback((user) => {
+    applyAuthUser(null)
+    pendingMfaIdentity.current = user
+    setMfaPending(user)
+  }, [applyAuthUser])
 
   useEffect(() => {
     let active = true
@@ -146,17 +154,28 @@ export function AppProvider({ children }) {
             applyAuthUser(null)
             return
           }
-          applyAuthUser({
+          const user = {
             id: data.user.id, email: data.user.email, name: profile.name,
             role: profile.role, type: profile.role, status: profile.status,
-          })
+          }
+          const mfa = await getMfaRequirement(user)
+          if (!isCurrent()) return
+          if (mfa.required) applyPendingMfa(user)
+          else applyAuthUser(user)
         } catch {
           if (isCurrent()) applyAuthUser(null)
         }
       }, 0)
     }
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!active || (loginPending.current && event !== "SIGNED_OUT")) return
+      if (!active) return
+      if (loginPending.current && event !== "SIGNED_OUT") {
+        if (verifyingMfa.current && session?.user?.id !== pendingMfaIdentity.current?.id) {
+          authVersion.current += 1
+          applyAuthUser(null)
+        }
+        return
+      }
       if (!session) {
         authVersion.current += 1
         clearTimeout(timer)
@@ -168,13 +187,22 @@ export function AppProvider({ children }) {
     // Database role changes don't themselves emit an Auth event. Recheck on focus.
     const onFocus = () => {
       try { sanitizeAppCaches(window.localStorage || localStorage, window.sessionStorage) } catch { /* storage unavailable */ }
-      if (authenticatedId.current) validateProfile(authenticatedId.current)
+      const id = authenticatedId.current || pendingMfaIdentity.current?.id
+      if (id) validateProfile(id)
     }
     const onStorage = () => {
       try { sanitizeAppCaches(window.localStorage || localStorage, window.sessionStorage) } catch { /* storage unavailable */ }
     }
+    const onMfaRequired = event => {
+      const id = event.detail?.userId
+      if (!id || id !== authenticatedId.current || authenticatedRole.current !== "admin") return
+      authVersion.current += 1
+      clearTimeout(timer)
+      applyPendingMfa({ id, role: "admin", type: "admin", status: "active" })
+    }
     window.addEventListener("focus", onFocus)
     window.addEventListener("storage", onStorage)
+    window.addEventListener("modus:mfa-required", onMfaRequired)
     return () => {
       active = false
       authVersion.current += 1
@@ -183,8 +211,9 @@ export function AppProvider({ children }) {
       subscription.unsubscribe()
       window.removeEventListener("focus", onFocus)
       window.removeEventListener("storage", onStorage)
+      window.removeEventListener("modus:mfa-required", onMfaRequired)
     }
-  }, [applyAuthUser])
+  }, [applyAuthUser, applyPendingMfa])
   function isCurrentSession(version) {
     return version === dataVersion.current && Boolean(authenticatedId.current) &&
       authUser?.id === authenticatedId.current && authUser?.role === authenticatedRole.current
@@ -242,6 +271,11 @@ export function AppProvider({ children }) {
       ])
       if (!isCurrent()) return
       const failures = results.filter((result) => result.status === "rejected")
+      if (failures.some(({ reason }) => reason.code === "mfa_required")) {
+        authVersion.current += 1
+        applyPendingMfa({ id: userId, role, type: role, status: "active" })
+        return
+      }
       const denied = failures.find(({ reason }) => [401, 403].includes(reason.status))
       if (denied) {
         // Authentication/authorization errors never restore private cached data.
@@ -266,10 +300,10 @@ export function AppProvider({ children }) {
       // There is no users-list API yet. Do not present local seed data as
       // Supabase accounts while administrative provisioning is being added.
       setUsers([])
-      setTasks(saved?.tasks || initialTasks)
+      setTasks(saved?.tasks || [])
       setBackendError(failures[0]?.reason.message || null)
       setOrdersLoading(false)
-      setHydrated(true)
+      setHydrated(failures.length === 0)
     }
     // Defer so Strict Mode's setup/cleanup replay doesn't duplicate requests.
     const timer = setTimeout(initialize, 0)
@@ -277,7 +311,7 @@ export function AppProvider({ children }) {
       active = false
       clearTimeout(timer)
     }
-  }, [authUser?.id, authUser?.role, authUser?.status])
+  }, [authUser?.id, authUser?.role, authUser?.status, applyPendingMfa])
 
 
   /*
@@ -767,6 +801,12 @@ export function AppProvider({ children }) {
       if (version !== authVersion.current) {
         return { ok: false, message: "Sessão alterada. Tente entrar novamente." }
       }
+      const mfa = await getMfaRequirement(user)
+      if (version !== authVersion.current) return { ok: false, message: "Sessão alterada. Tente entrar novamente." }
+      if (mfa.required) {
+        applyPendingMfa(user)
+        return { ok: false, mfaRequired: true }
+      }
       applyAuthUser(user)
       setCurrentUserId(null)
 
@@ -774,9 +814,52 @@ export function AppProvider({ children }) {
         ok: true,
         user,
       }
+    } catch {
+      if (version === authVersion.current) applyAuthUser(null)
+      return { ok: false, message: "Não foi possível validar o acesso. Tente entrar novamente." }
     } finally {
       loginPending.current = false
       if (version === authVersion.current) setAuthLoading(false)
+    }
+  }
+
+
+  async function completeMfa(code) {
+    if (verifyingMfa.current || loginPending.current) return { ok: false, message: "Verificação em andamento." }
+    const user = pendingMfaIdentity.current
+    if (!user) return { ok: false, message: "Entre novamente para continuar." }
+    verifyingMfa.current = true
+    loginPending.current = true
+    const version = ++authVersion.current
+    let verifiedToken = null
+    try {
+      verifiedToken = await verifyMfaChallenge(user, code)
+      if (version !== authVersion.current || pendingMfaIdentity.current?.id !== user.id) {
+        await discardStaleMfaSession(user.id, verifiedToken)
+        return { ok: false, message: "Sessão alterada. Entre novamente." }
+      }
+      const { data, error } = await supabase.auth.getUser()
+      if (error || data?.user?.id !== user.id) throw new Error()
+      const { data: profile, error: profileError } = await supabase.from("profiles")
+        .select("name, role, status").eq("id", user.id).single()
+      const mfa = await getMfaRequirement(user)
+      if (version !== authVersion.current || pendingMfaIdentity.current?.id !== user.id) {
+        await discardStaleMfaSession(user.id, verifiedToken)
+        return { ok: false, message: "Sessão alterada. Entre novamente." }
+      }
+      if (profileError || profile?.role !== "admin" || profile?.status !== "active") {
+        await logout()
+        return { ok: false, message: "Perfil não autorizado. Entre novamente." }
+      }
+      if (mfa.required || mfa.level !== "aal2") throw new Error()
+      const authorized = { ...user, name: profile.name, email: data.user.email }
+      applyAuthUser(authorized)
+      return { ok: true, user: authorized }
+    } catch {
+      return { ok: false, message: "Não foi possível validar o código. Confira o autenticador e tente novamente ou entre novamente." }
+    } finally {
+      verifyingMfa.current = false
+      loginPending.current = false
     }
   }
 
@@ -944,6 +1027,10 @@ export function AppProvider({ children }) {
      */
 
     authLoading,
+
+    mfaPending: Boolean(mfaPending),
+
+    completeMfa,
 
     
     currentUser,

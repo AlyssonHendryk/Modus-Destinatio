@@ -125,10 +125,10 @@ function ProductEditForm({ product, onClose, saveProduct, changeStock }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" role="presentation">
-      <form onSubmit={handleSubmit} role="dialog" aria-modal="true" aria-labelledby="edit-product-title" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-gray-100 bg-white p-5 shadow-2xl sm:p-6">
-        <fieldset disabled={saving} className="m-0 space-y-5 border-0 p-0">
+      <form onSubmit={handleSubmit} role="dialog" aria-modal="true" aria-labelledby="edit-product-title" className="max-h-[calc(100dvh-2rem)] sm:max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-gray-100 bg-white p-5 shadow-2xl sm:p-6">
+        <fieldset disabled={saving} className="m-0 min-w-0 space-y-5 border-0 p-0">
           <div className="flex items-start justify-between gap-4 border-b border-gray-100 pb-4">
-            <div><h2 id="edit-product-title" className="text-xl font-bold text-gray-900">Editar Produto</h2><p className="mt-1 text-sm text-gray-500">Código do produto: {original.id}</p></div>
+            <div><h2 id="edit-product-title" className="text-xl font-bold text-gray-900">Editar Produto</h2><p className="mt-1 text-sm text-gray-500 [overflow-wrap:anywhere]">Código do produto: {original.id}</p></div>
             <button ref={closeButtonRef} type="button" onClick={requestClose} className="rounded-xl p-2 text-gray-500 hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-purple-600" aria-label="Fechar edição de produto"><X className="h-5 w-5" /></button>
           </div>
 

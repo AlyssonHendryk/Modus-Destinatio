@@ -85,10 +85,10 @@ export function OrdersTable({
     ])
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    <div className="min-w-0 max-w-full bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
 
-      <div className="overflow-x-auto">
-        <table className="w-full">
+      <div className="max-w-full overflow-x-auto">
+        <table className="w-full min-w-[40rem]">
 
           <thead>
             <tr className="orders-table-header border-b bg-gray-50/50">
@@ -243,7 +243,7 @@ export function OrdersTable({
                         className="orders-table-details bg-gray-50 p-5"
                       >
                         <div className="bg-white border rounded-xl overflow-hidden">
-                          <table className="w-full">
+                          <table className="w-full min-w-[40rem]">
 
                             <thead>
                               <tr className="border-b">
@@ -310,7 +310,7 @@ export function OrdersTable({
         </table>
       </div>
 
-      <div className="orders-table-footer border-t px-6 py-4 bg-gray-50/30 flex items-center justify-between">
+      <div className="orders-table-footer border-t px-6 py-4 bg-gray-50/30 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
 
         <p className="text-sm text-gray-600">
           Página {currentPage} de {totalPages}

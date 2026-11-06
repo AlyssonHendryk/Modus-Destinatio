@@ -6,7 +6,7 @@ import { canViewFinancials, sumFinancialValues } from "@/utils/financialPresenta
 export default function KPICards({ orders = [], inventory = [] }) {
   const { currentUser } = useApp()
   const isAdmin = canViewFinancials(currentUser)
-  const revenue = isAdmin ? sumFinancialValues(orders.filter(o=>o.status!=="cancelled").map(o=>o.total)) : undefined
+  const revenue = isAdmin ? sumFinancialValues(orders.filter(o=>o.operation==="Venda" && o.status!=="cancelled").map(o=>o.total)) : undefined
   const low = inventory.filter(i=>i.quantity<=i.min).length
   const active = inventory.filter(i=>i.active!==false).length
   const kpis=[
@@ -15,5 +15,5 @@ export default function KPICards({ orders = [], inventory = [] }) {
     ...(isAdmin ? [{title:"Vendas",value:formatCurrency(revenue),icon:TrendingUp,color:"from-green-500 to-green-600"}] : []),
     {title:"Produtos Ativos",value:active,icon:Package,color:"from-purple-500 to-purple-600"},
   ]
-  return <div className={`grid grid-cols-1 md:grid-cols-2 ${isAdmin ? "xl:grid-cols-4" : "xl:grid-cols-3"} gap-6`}>{kpis.map(k=>{const Icon=k.icon;return <div key={k.title} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100"><div className="flex items-start justify-between"><div><p className="text-sm text-gray-500 mb-1">{k.title}</p><h3 className="text-2xl font-bold text-gray-900">{k.value}</h3></div><div className={`w-12 h-12 bg-gradient-to-br ${k.color} rounded-xl flex items-center justify-center shadow-lg`}><Icon className="w-6 h-6 text-white"/></div></div></div>})}</div>
+  return <div className={`grid grid-cols-1 md:grid-cols-2 ${isAdmin ? "xl:grid-cols-4" : "xl:grid-cols-3"} gap-6`}>{kpis.map(k=>{const Icon=k.icon;return <div key={k.title} className="min-w-0 bg-white rounded-2xl p-6 shadow-sm border border-gray-100"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-sm text-gray-500 mb-1">{k.title}</p><h3 className="text-2xl font-bold text-gray-900 [overflow-wrap:anywhere]">{k.value}</h3></div><div className={`w-12 h-12 shrink-0 bg-gradient-to-br ${k.color} rounded-xl flex items-center justify-center shadow-lg`}><Icon className="w-6 h-6 text-white"/></div></div></div>})}</div>
 }

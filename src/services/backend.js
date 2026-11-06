@@ -173,6 +173,19 @@ async function request(endpoint, options = {}) {
 
     const requestError = new Error(message)
     requestError.status = response.status
+    if (response.status === 403 && message === "mfa_required") {
+      requestError.code = "mfa_required"
+      // Invalidate UI access even when MFA was enabled after the initial load.
+      // Ignore old requests from a different login or an already upgraded token.
+      try {
+        const { data: latest } = await supabase.auth.getSession()
+        const userId = data.session.user?.id
+        if (userId && latest?.session?.access_token === accessToken &&
+            latest.session.user?.id === userId && typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("modus:mfa-required", { detail: { userId } }))
+        }
+      } catch { /* The HTTP error still blocks the operation. */ }
+    }
     throw requestError
   }
 
@@ -195,11 +208,6 @@ export async function getOrders() {
 export async function createOrder(order) {
   const payload =
     toBackendOrder(order)
-
-  console.log(
-    "Criando pedido:",
-    payload
-  )
 
   const data = await request(
     "/api/orders",

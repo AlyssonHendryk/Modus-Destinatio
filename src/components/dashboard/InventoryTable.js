@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { AlertTriangle, Plus, Minus, Trash2, Edit2, Save, X } from "lucide-react"
 import { useApp } from "@/context/AppContext"
 import { formatCurrency } from "@/utils/formatters"
@@ -24,6 +24,8 @@ export default function InventoryTable({ compact = false, search = "" }) {
     unitPrice: 0,
     active: true,
   })
+  const [submitting, setSubmitting] = useState(false)
+  const submissionPending = useRef(false)
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -41,7 +43,7 @@ export default function InventoryTable({ compact = false, search = "" }) {
 
 
   function openCreate() {
-    if (!isAdmin) return
+    if (!isAdmin || submissionPending.current) return
     setForm({ name: "", quantity: 0, max: 100, min: 10, unitPrice: 0, active: true })
     setShowForm(true)
   }
@@ -53,12 +55,14 @@ export default function InventoryTable({ compact = false, search = "" }) {
 
   async function submit(e) {
     e.preventDefault()
-    if (!isAdmin) return
+    if (!isAdmin || submissionPending.current) return
 
     if (!form.name.trim()) {
       return
     }
 
+    submissionPending.current = true
+    setSubmitting(true)
     try {
       await saveProduct({
         ...form,
@@ -77,6 +81,9 @@ export default function InventoryTable({ compact = false, search = "" }) {
         error.message ||
         "Não foi possível salvar o produto."
       )
+    } finally {
+      submissionPending.current = false
+      setSubmitting(false)
     }
   }
   async function handleStockChange(id, delta) {
@@ -120,55 +127,56 @@ export default function InventoryTable({ compact = false, search = "" }) {
     }
   }
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-      <div className="flex items-center justify-between mb-6">
+    <div className="min-w-0 bg-white rounded-2xl p-4 shadow-sm border border-gray-100 sm:p-6">
+      <div className="flex flex-col items-start justify-between gap-3 mb-6 sm:flex-row sm:items-center">
         <div><h2 className="text-gray-900 font-semibold mb-1">Itens Armazenados</h2><p className="text-sm text-gray-500">Status e movimentação do estoque</p></div>
-        {isAdmin && !compact && <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl"><Plus className="w-4 h-4" />Novo produto</button>}
+        {isAdmin && !compact && <button onClick={openCreate} disabled={submitting} className="flex w-full items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl sm:w-auto"><Plus className="w-4 h-4" />Novo produto</button>}
       </div>
 
 
       {isAdmin && showForm && !compact && (
         <form
           onSubmit={submit}
-          className="mb-6 border rounded-xl p-4 grid md:grid-cols-6 gap-3 bg-gray-50"
+          className="mb-6 border rounded-xl p-4 grid xl:grid-cols-6 gap-3 bg-gray-50"
         >
-          <div className="md:col-span-2 space-y-1">
+          <div className="xl:col-span-2 space-y-1">
             <label htmlFor="product-name" className="block text-xs font-medium text-gray-700">Nome do produto</label>
-            <input id="product-name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+            <input id="product-name" disabled={submitting} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
               placeholder="Ex.: Arroz integral" className="form-control w-full rounded-lg p-2 text-gray-900" />
           </div>
 
           <div className="space-y-1">
             <label htmlFor="product-quantity" className="block text-xs font-medium text-gray-700">Quantidade</label>
-            <input id="product-quantity" type="number" min="0" value={form.quantity} onChange={e => setForm({
+            <input id="product-quantity" disabled={submitting} type="number" min="0" value={form.quantity} onChange={e => setForm({
               ...form, quantity: Number(e.target.value)
             })} title="Quantidade inicial do produto." placeholder="0" className="form-control w-full rounded-lg p-2 text-gray-900" />
           </div>
 
           <div className="space-y-1">
             <label htmlFor="product-min" className="block text-xs font-medium text-gray-700">Estoque mínimo</label>
-            <input id="product-min" type="number" min="0" value={form.min} onChange={e => setForm({
+            <input id="product-min" disabled={submitting} type="number" min="0" value={form.min} onChange={e => setForm({
               ...form, min: Number(e.target.value)
             })} placeholder="0" className="form-control w-full rounded-lg p-2 text-gray-900" />
           </div>
 
           <div className="space-y-1">
             <label htmlFor="product-max" className="block text-xs font-medium text-gray-700">Estoque máximo</label>
-            <input id="product-max" type="number" min="1" value={form.max} onChange={e => setForm({
+            <input id="product-max" disabled={submitting} type="number" min="1" value={form.max} onChange={e => setForm({
               ...form, max: Number(e.target.value)
             })} placeholder="100" className="form-control w-full rounded-lg p-2 text-gray-900" />
           </div>
 
           <div className="space-y-1">
             <label htmlFor="product-price" className="block text-xs font-medium text-gray-700">Preço unitário</label>
-            <input id="product-price" type="number" min="0" step="0.01" value={form.unitPrice} onChange={e => setForm({
+            <input id="product-price" disabled={submitting} type="number" min="0" step="0.01" value={form.unitPrice} onChange={e => setForm({
               ...form, unitPrice: Number(e.target.value)
             })} placeholder="0,00" className="form-control w-full rounded-lg p-2 text-gray-900" />
           </div>
 
-          <div className="md:col-span-6 flex justify-end gap-2">
+          <div className="xl:col-span-6 flex justify-end gap-2">
             <button
               type="button"
+              disabled={submitting}
               onClick={() => setShowForm(false)}
               className="px-3 py-2 border rounded-lg flex items-center gap-1"
             >
@@ -178,10 +186,11 @@ export default function InventoryTable({ compact = false, search = "" }) {
 
             <button
               type="submit"
+              disabled={submitting}
               className="px-3 py-2 bg-purple-600 text-white rounded-lg flex items-center gap-1"
             >
               <Save className="w-4 h-4" />
-              Cadastrar produto
+              {submitting ? "Cadastrando..." : "Cadastrar produto"}
             </button>
           </div>
         </form>
@@ -193,10 +202,10 @@ export default function InventoryTable({ compact = false, search = "" }) {
         const low = item.quantity <= item.min
         return <div key={item.id} className="border rounded-xl p-4">
 
-          <div className="flex items-center justify-between gap-3 mb-2">
-            <div>
+          <div className="flex flex-col items-stretch gap-3 mb-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="font-medium text-gray-900">
+                <span className="font-medium text-gray-900 [overflow-wrap:anywhere]">
                   {item.name}
                 </span>
 
@@ -205,12 +214,12 @@ export default function InventoryTable({ compact = false, search = "" }) {
                 )}
               </div>
 
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-500 [overflow-wrap:anywhere]">
                 {item.id}{isAdmin && <> • {formatCurrency(item.unitPrice)}</>}
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex max-w-full flex-wrap items-center gap-2">
               {isAdmin && <button
                 type="button"
                 onClick={() => handleStockChange(item.id, -1)}
@@ -271,7 +280,7 @@ export default function InventoryTable({ compact = false, search = "" }) {
             />
           </div>
 
-          <div className="flex justify-between text-xs text-gray-500 mt-1">
+          <div className="flex justify-between text-xs text-gray-500 [overflow-wrap:anywhere] mt-1">
             <span>Mín. {item.min}</span>
             <span>Máx. {item.max}</span>
           </div>

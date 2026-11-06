@@ -41,29 +41,29 @@ export default function OrderSeparationGrid({ orders = [], onStatusChange }) {
         const StatusIcon = c.icon
         return (
           <div key={order.id} className="bg-white border rounded-2xl shadow-sm overflow-hidden flex flex-col">
-            <div className="p-6 flex-1">
-              <div className="flex justify-between mb-5">
+            <div className="min-w-0 p-6 flex-1">
+              <div className="flex justify-between gap-3 mb-5">
                 <div>
-                  <h3 className="font-bold text-gray-900">PEDIDO {order.id}</h3>
+                  <h3 className="font-bold text-gray-900 [overflow-wrap:anywhere]">PEDIDO {order.id}</h3>
                   <span className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border ${c.badge}`}>
                     <StatusIcon className="w-3.5 h-3.5"/>{c.label}
                   </span>
                 </div>
-                <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-orange-500 rounded-xl flex items-center justify-center">
+                <div className="w-12 h-12 shrink-0 bg-gradient-to-br from-purple-500 to-orange-500 rounded-xl flex items-center justify-center">
                   <Package className="w-6 h-6 text-white"/>
                 </div>
               </div>
               <div className="flex items-center gap-2 text-gray-700 mb-4">
                 <User className="w-4 h-4 text-gray-400"/>
-                <span className="text-sm">Cliente: <b>{order.customer || "Cliente não informado"}</b></span>
+                <span className="min-w-0 text-sm [overflow-wrap:anywhere]">Cliente: <b>{order.customer || "Cliente não informado"}</b></span>
               </div>
               <p className="text-xs text-gray-500 uppercase mb-2">Produtos</p>
               <ul className="space-y-2">
                 {(order.items || []).map((item, index) => (
                   <li key={`${item.productId}-${index}`} className="flex items-center gap-2 text-sm text-gray-700">
                     <span className="w-1.5 h-1.5 bg-purple-500 rounded-full"/>
-                    <span>{item.product}</span>
-                    <span className="ml-auto px-2 py-0.5 bg-gray-100 rounded-full text-xs font-semibold">{item.quantity}</span>
+                    <span className="min-w-0 [overflow-wrap:anywhere]">{item.product}</span>
+                    <span className="ml-auto shrink-0 px-2 py-0.5 bg-gray-100 rounded-full text-xs font-semibold">{item.quantity}</span>
                   </li>
                 ))}
               </ul>

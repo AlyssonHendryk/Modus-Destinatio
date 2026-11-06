@@ -46,6 +46,43 @@ test('backend authentication rejection is propagated without retrying a mutation
   assert.equal(calls, 1)
 })
 
+test('backend MFA requirement keeps a stable code and never retries the operation', async t => {
+  t.mock.method(console, 'error', () => {})
+  session = { access_token: token }
+  let calls = 0
+  globalThis.fetch = async () => {
+    calls++
+    return new Response(JSON.stringify({ detail: 'mfa_required' }), { status: 403 })
+  }
+  await assert.rejects(backend.getProducts(), error => error.status === 403 && error.code === 'mfa_required')
+  assert.equal(calls, 1)
+})
+
+test('MFA notification is scoped to the exact current token and never carries the token', async t => {
+  t.mock.method(console, 'error', () => {})
+  const events = []
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  Object.defineProperty(globalThis, 'window', { value: { dispatchEvent: event => events.push(event) }, configurable: true })
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, 'window', previous)
+    else delete globalThis.window
+  })
+  session = { access_token: token, user: { id: 'A' } }
+  globalThis.fetch = async () => new Response(JSON.stringify({ detail: 'mfa_required' }), { status: 403 })
+  await assert.rejects(backend.getProducts())
+  assert.equal(events.length, 1)
+  assert.deepEqual(events[0].detail, { userId: 'A' })
+  assert.equal(events[0].type, 'modus:mfa-required')
+  assert.doesNotMatch(JSON.stringify(events[0].detail), new RegExp(token))
+  events.length = 0
+  globalThis.fetch = async () => {
+    session = { access_token: 'new-test-session', user: { id: 'B' } }
+    return new Response(JSON.stringify({ detail: 'mfa_required' }), { status: 403 })
+  }
+  await assert.rejects(backend.getProducts())
+  assert.equal(events.length, 0)
+})
+
 test('separation service sends exactly action with Bearer and preserves operational response', async () => {
   session = { access_token: token }
   for (const action of ['start', 'confirm']) {

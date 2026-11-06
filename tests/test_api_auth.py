@@ -14,6 +14,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from postgrest.exceptions import APIError
 from supabase_auth.errors import AuthApiError
+from supabase_auth.types import Factor
 
 from api_auth import AuthSettings, require_active_user, verify_token
 
@@ -48,6 +49,7 @@ class ApiAuthenticationTests(unittest.TestCase):
             key=self.signing_key.public_key()
         )
         self.profile_client.reset_mock(return_value=True, side_effect=True)
+        self.profile_client.auth.admin.mfa.list_factors.return_value = []
         self.audit_request_ids = set()
         self.query = self.profile_client.schema.return_value.table.return_value
         self.result = self.query.select.return_value.eq.return_value.limit.return_value.execute
@@ -254,6 +256,166 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.assert_audit_rpc(
             "audit_adjust_stock", {"p_product_id": "test-product", "p_delta": 1}
         )
+
+    def mfa_factor(self, status="verified", factor_type="totp"):
+        # Match the official installed SDK's List[Factor] response, not a mock
+        # data envelope that could conceal an integration incompatibility.
+        return Factor(
+            id=str(UUID(int=27)), factor_type=factor_type, status=status,
+            created_at="2026-01-01T00:00:00Z", updated_at="2026-01-01T00:00:00Z",
+        )
+
+    def prepare_operational_read(self):
+        self.profile_client.table.return_value.select.return_value.order.return_value.limit.return_value.execute.return_value = SimpleNamespace(data=[])
+
+    def test_mfa_employee_access_is_unchanged_for_both_assurance_levels(self):
+        self.prepare_operational_read()
+        lookup = self.profile_client.auth.admin.mfa.list_factors
+        lookup.return_value = [self.mfa_factor()]
+        for aal in ("aal1", "aal2"):
+            with self.subTest(aal=aal):
+                self.assertEqual(self.request(self.token(aal=aal)).status_code, 200)
+        lookup.assert_not_called()
+
+    def test_mfa_admin_without_verified_factors_keeps_access_with_aal1_or_missing_claim(self):
+        self.set_profile("admin")
+        self.prepare_operational_read()
+        lookup = self.profile_client.auth.admin.mfa.list_factors
+        for factors in ([], [self.mfa_factor("unverified")]):
+            lookup.return_value = factors
+            for claims in ({}, {"aal": "aal1"}):
+                with self.subTest(factors=len(factors), claims=claims):
+                    lookup.reset_mock()
+                    self.assertEqual(self.request(self.token(**claims)).status_code, 200)
+                    lookup.assert_called_once_with({"user_id": self.user_id})
+
+    def test_mfa_admin_with_verified_factor_requires_aal2_including_legacy_jwt(self):
+        self.set_profile("admin")
+        lookup = self.profile_client.auth.admin.mfa.list_factors
+        lookup.return_value = [self.mfa_factor()]
+        for claims in ({}, {"aal": "aal1"}):
+            with self.subTest(claims=claims):
+                lookup.reset_mock()
+                response = self.request(self.token(**claims))
+                self.assertEqual(response.status_code, 403)
+                self.assertEqual(response.json(), {"detail": "mfa_required"})
+                self.assertNotIn(self.user_id, response.text)
+                lookup.assert_called_once_with({"user_id": self.user_id})
+        self.profile_client.table.assert_not_called()
+        self.profile_client.rpc.assert_not_called()
+
+    def test_mfa_admin_aal2_keeps_authorized_handler_without_factor_lookup(self):
+        self.set_profile("admin")
+        self.profile_client.auth.admin.mfa.list_factors.return_value = [self.mfa_factor()]
+        self.profile_client.rpc.return_value.execute.return_value = SimpleNamespace(data=11)
+        response = self.client.patch("/api/products/P1/stock", json={"delta": 1},
+            headers={"Authorization": "Bearer " + self.token(aal="aal2")})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["newQuantity"], 11)
+        self.profile_client.auth.admin.mfa.list_factors.assert_not_called()
+        self.assert_audit_rpc("audit_adjust_stock", {"p_product_id": "P1", "p_delta": 1})
+
+    def test_mfa_never_bypasses_invalid_jwt_inactive_or_missing_profile(self):
+        lookup = self.profile_client.auth.admin.mfa.list_factors
+        self.set_profile("admin", "inactive")
+        self.assertEqual(self.request(self.token(aal="aal2")).status_code, 403)
+        self.result.return_value = SimpleNamespace(data=[])
+        self.assertEqual(self.request(self.token(aal="aal2")).status_code, 403)
+        self.set_profile("owner")
+        self.assertEqual(self.request(self.token(aal="aal2")).status_code, 403)
+        self.set_profile("admin")
+        self.assertEqual(self.request("invalid").status_code, 401)
+        self.assertEqual(self.request(self.token(aal="aal2", exp=int(time.time()) - 1)).status_code, 401)
+        lookup.assert_not_called()
+        self.profile_client.table.assert_not_called()
+        self.profile_client.rpc.assert_not_called()
+
+    def test_mfa_aal2_does_not_promote_employee_or_allow_administrative_writes(self):
+        for method, path, body in self.administrative_requests():
+            with self.subTest(method=method, path=path):
+                response = self.client.request(method, path, json=body,
+                    headers={"Authorization": "Bearer " + self.token(aal="aal2")})
+                self.assertEqual(response.status_code, 403)
+                self.assertNotEqual(response.json(), {"detail": "mfa_required"})
+        self.profile_client.auth.admin.mfa.list_factors.assert_not_called()
+        self.profile_client.rpc.assert_not_called()
+        self.profile_client.table.assert_not_called()
+
+    def test_mfa_factor_lookup_failure_and_malformed_response_fail_closed_without_details(self):
+        self.set_profile("admin")
+        lookup = self.profile_client.auth.admin.mfa.list_factors
+        for failure in (TimeoutError("private-token private-email"), RuntimeError("private provider detail")):
+            lookup.side_effect = failure
+            response = self.request(self.token(aal="aal1"))
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.json(), {"detail": "Não foi possível verificar os requisitos de autenticação."})
+            self.assertNotIn("private", response.text)
+        lookup.side_effect = None
+        for response_data in (None, {}, {"data": []}, [None], [{"status": "verified"}]):
+            with self.subTest(response_type=type(response_data).__name__):
+                lookup.return_value = response_data
+                self.assertEqual(self.request(self.token()).status_code, 503)
+        self.profile_client.table.assert_not_called()
+        self.profile_client.rpc.assert_not_called()
+
+    def test_mfa_pending_admin_cannot_access_any_private_route_or_trigger_handler(self):
+        self.set_profile("admin")
+        self.profile_client.auth.admin.mfa.list_factors.return_value = [self.mfa_factor()]
+        headers = {"Authorization": "Bearer " + self.token(aal="aal1")}
+        for route, operations in self.main.app.openapi()["paths"].items():
+            if not route.startswith("/api/") or route == "/api/health":
+                continue
+            path = route.replace("{order_id}", "O1").replace("{product_id}", "P1").replace("{user_id}", str(UUID(int=42)))
+            for method in operations:
+                with self.subTest(method=method, path=path):
+                    response = self.client.request(method, path, json={}, headers=headers)
+                    self.assertEqual(response.status_code, 403)
+                    self.assertEqual(response.json(), {"detail": "mfa_required"})
+        self.profile_client.table.assert_not_called()
+        self.query.insert.assert_not_called()
+        self.query.update.assert_not_called()
+        self.query.delete.assert_not_called()
+        self.profile_client.rpc.assert_not_called()
+        self.profile_client.auth.admin.create_user.assert_not_called()
+        self.profile_client.auth.admin.delete_user.assert_not_called()
+
+    def test_mfa_no_factor_absence_cache_and_deduplicated_dependency_per_request(self):
+        self.set_profile("admin")
+        lookup = self.profile_client.auth.admin.mfa.list_factors
+        lookup.return_value = []
+        self.profile_client.rpc.return_value.execute.return_value = SimpleNamespace(data=11)
+        headers = {"Authorization": "Bearer " + self.token(aal="aal1")}
+        response = self.client.patch("/api/products/P1/stock", json={"delta": 1}, headers=headers)
+        self.assertEqual(response.status_code, 200)
+        lookup.assert_called_once_with({"user_id": self.user_id})
+        self.profile_client.rpc.reset_mock()
+        lookup.return_value = [self.mfa_factor()]
+        response = self.client.patch("/api/products/P1/stock", json={"delta": 1}, headers=headers)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(lookup.call_count, 2)
+        self.profile_client.rpc.assert_not_called()
+
+    def test_mfa_body_claims_cannot_bypass_pending_admin_and_health_remains_public(self):
+        self.set_profile("admin")
+        lookup = self.profile_client.auth.admin.mfa.list_factors
+        lookup.return_value = [self.mfa_factor()]
+        response = self.client.post("/api/orders", json={
+            "aal": "aal2", "role": "admin", "mfaEnabled": False, "factorId": "fake", "factors": [],
+        }, headers={"Authorization": "Bearer " + self.token(aal="aal1")})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"detail": "mfa_required"})
+        self.profile_client.rpc.assert_not_called()
+        lookup.reset_mock()
+        self.assertEqual(self.client.get("/api/health").status_code, 200)
+        self.assertEqual(self.client.get("/api/health", headers={"Authorization": "Bearer invalid"}).status_code, 200)
+        lookup.assert_not_called()
+
+    def test_mfa_unrecognized_admin_assurance_level_fails_closed_before_lookup(self):
+        self.set_profile("admin")
+        for aal in (None, "aal3", "", [], {}):
+            with self.subTest(aal=aal):
+                self.assertEqual(self.request(self.token(aal=aal)).status_code, 401)
+        self.profile_client.auth.admin.mfa.list_factors.assert_not_called()
 
     def administrative_requests(self):
         product = {
@@ -878,6 +1040,13 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.profile_client.auth.admin.delete_user.assert_called_once_with(self.new_employee_id)
         self.assertEqual(self.profile_client.rpc.call_args.args[1]["p_outcome"], "failed")
 
+    def test_stock_input_rejects_zero_fractional_and_extra_fields_before_rpc(self):
+        self.set_profile("admin")
+        for body in [{"delta": 0}, {"delta": 1.5}, {"delta": 1, "role": "admin"}, {"delta": 2147483648}]:
+            response = self.client.patch("/api/products/P1/stock", json=body, headers={"Authorization": "Bearer " + self.token()})
+            self.assertEqual(response.status_code, 422)
+        self.profile_client.rpc.assert_not_called()
+
     def test_admin_creation_cannot_be_called_by_employee_inactive_or_anonymous(self):
         for role, status in [("employee", "active"), ("admin", "inactive")]:
             self.set_profile(role, status)
@@ -919,6 +1088,16 @@ class ApiAuthenticationTests(unittest.TestCase):
         response = self.create_employee_request(self.employee_payload(role="admin", id=self.user_id))
         self.assertEqual(response.status_code, 422)
         self.profile_client.auth.admin.create_user.assert_not_called()
+
+    def test_order_and_stock_failures_do_not_echo_raw_database_errors(self):
+        for method, path, body in [("POST", "/api/orders", self.administrative_requests()[4][2]),
+                                   ("PATCH", "/api/products/P1/stock", {"delta": 1})]:
+            self.set_profile("admin")
+            self.profile_client.rpc.return_value.execute.side_effect = RuntimeError("internal SQL secret detail")
+            response = self.client.request(method, path, json=body, headers={"Authorization": "Bearer " + self.token()})
+            self.assertEqual(response.status_code, 500)
+            self.assertNotIn("secret detail", response.text)
+            self.profile_client.rpc.return_value.execute.side_effect = None
 
     def status_request(self, user_id, payload=None, token=None):
         return self.client.patch(
@@ -1090,6 +1269,7 @@ class ApiAuthenticationTests(unittest.TestCase):
         self.query = self.profile_client.schema.return_value.table.return_value
         self.result = self.query.select.return_value.eq.return_value.limit.return_value.execute
         self.set_profile("admin")
+        self.profile_client.auth.admin.mfa.list_factors.return_value = []
         response = self.delete_employee_request("not-a-uuid")
         self.assertEqual(response.status_code, 422)
         self.profile_client.auth.admin.delete_user.assert_not_called()

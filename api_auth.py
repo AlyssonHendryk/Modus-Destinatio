@@ -8,6 +8,7 @@ from uuid import UUID
 import jwt
 from fastapi import Depends, HTTPException, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from supabase_auth.types import Factor
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -72,6 +73,32 @@ class AuthenticatedUser:
     role: str
 
 
+def require_optional_admin_mfa(client, user_id, claims):
+    """Require a second factor only for admins who have verified MFA in Auth."""
+    # This claim is read only after verify_token has authenticated the JWT.
+    # Legacy JWTs without an aal claim have no second-factor assurance.
+    aal = claims.get("aal", "aal1")
+    if aal == "aal2":
+        return
+    if aal != "aal1":
+        raise HTTPException(
+            401, "Sessão inválida ou expirada.", headers={"WWW-Authenticate": "Bearer"}
+        )
+    try:
+        # SDK 2.32.0 returns List[Factor], not a PostgREST data envelope.
+        # Query the validated subject only; never cache an absence of factors.
+        factors = client.auth.admin.mfa.list_factors({"user_id": user_id})
+        if not isinstance(factors, list) or any(not isinstance(factor, Factor) for factor in factors):
+            raise ValueError("Unexpected MFA response")
+        verified = any(factor.status == "verified" for factor in factors)
+    except Exception:
+        raise HTTPException(503, "Não foi possível verificar os requisitos de autenticação.") from None
+    if verified:
+        # Preserve the existing string-detail contract while exposing a stable
+        # identifier to the future frontend challenge flow. No factor data leaks.
+        raise HTTPException(403, "mfa_required")
+
+
 def require_active_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Security(bearer),
@@ -97,11 +124,14 @@ def require_active_user(
         raise HTTPException(403, "Perfil não autorizado.")
     profile = rows[0]
     if (
-        profile.get("id") != claims["sub"]
+        not isinstance(profile, dict)
+        or profile.get("id") != claims["sub"]
         or profile.get("status") != "active"
         or profile.get("role") not in {"admin", "employee"}
     ):
         raise HTTPException(403, "Perfil não autorizado.")
+    if profile["role"] == "admin":
+        require_optional_admin_mfa(request.app.state.profile_client, claims["sub"], claims)
     user = AuthenticatedUser(id=claims["sub"], role=profile["role"])
     request.state.authenticated_user = user
     return user

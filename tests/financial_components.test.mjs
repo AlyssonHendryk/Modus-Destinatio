@@ -36,7 +36,8 @@ const order = {
 function render(name, role, props = {}, options = {}) {
   const app = {
     currentUser: role ? { id: 'test-user', role, status: options.status || 'active' } : null,
-    authLoading: false, orders: [order], inventory: [product], tasks: [], stockMovements: [],
+    authLoading: false, hydrated: true, ordersLoading: false, backendError: null,
+    orders: [order], inventory: [product], tasks: [], stockMovements: [],
     saveProduct() { throw new Error('SSR must not mutate data') },
     deleteProduct() { throw new Error('SSR must not mutate data') },
     changeStock() { throw new Error('SSR must not mutate data') },
@@ -68,7 +69,10 @@ function render(name, role, props = {}, options = {}) {
         get: (_target, icon) => icon === '__esModule' ? true : () => React.createElement('svg', { 'data-icon': icon }),
       })
       if (specifier === 'recharts') return new Proxy({}, {
-        get: (_target, chart) => chart === '__esModule' ? true : ({ children }) => React.createElement('div', { 'data-chart': chart }, children),
+        get: (_target, chart) => chart === '__esModule' ? true : ({ children, data }) => {
+          options.onChartData?.(chart, data)
+          return React.createElement('div', { 'data-chart': chart }, children)
+        },
       })
       if (specifier === 'react' && options.states?.[relative]) {
         return { ...React, useState(initial) {
@@ -196,6 +200,58 @@ test('mixed complete/incomplete orders never produce partial revenue or a financ
   assert.match(kpis, /Vendas/)
   assert.match(kpis, /—/)
   assert.doesNotMatch(render('charts', 'admin', { orders }), /Vendas por data/)
+})
+
+test('sales KPIs and chart exclude purchases and cancelled sales without changing all-operation counts', () => {
+  const orders = [
+    { ...order, id: 'sale', total: 100 },
+    { ...order, id: 'purchase', operation: 'Compra', total: 900 },
+    { ...order, id: 'cancelled', status: 'cancelled', total: 700 },
+  ]
+  const html = render('kpis', 'admin', { orders })
+  assert.match(html, /R\$[^<]*100,00/)
+  assert.doesNotMatch(html, /1\.000,00|900,00|700,00/)
+  assert.match(html, />3<\/h3>/)
+  const charts = new Map()
+  render('charts', 'admin', { orders }, { onChartData: (name, data) => {
+    if (data) charts.set(name, data)
+  } })
+  assert.deepEqual(charts.get('LineChart').map(value => value.vendas), [100])
+  assert.equal(charts.get('BarChart').reduce((sum, value) => sum + value.value, 0), 3)
+  // Missing purchase prices must not invalidate otherwise complete sales.
+  assert.match(render('kpis', 'admin', { orders: [orders[0], { ...orders[1], total: undefined }] }), /R\$[^<]*100,00/)
+})
+
+test('operational tabs distinguish loading and initial API failure from truly empty and loaded data', () => {
+  for (const initialTab of ['dashboard', 'pedidos', 'estoque', 'separar', 'historico']) {
+    const pending = render('dashboard', 'admin', { initialTab }, {
+      app: { hydrated: false, ordersLoading: true, orders: [], inventory: [] },
+    })
+    assert.match(pending, /Carregando dados operacionais/)
+    assert.doesNotMatch(pending, /Nenhum pedido encontrado|Nenhuma movimenta|R\$/)
+    const failed = render('dashboard', 'admin', { initialTab }, {
+      app: { hydrated: false, backendError: 'private database detail' },
+    })
+    assert.match(failed, /role="alert"/)
+    assert.match(failed, /Não foi possível carregar os dados operacionais/)
+    assert.doesNotMatch(failed, /private database detail|Cliente operacional|R\$/)
+    if (initialTab === 'historico') assert.match(failed, /id="activity-title"/)
+  }
+  const empty = render('dashboard', 'admin', { initialTab: 'pedidos' }, { app: { orders: [] } })
+  assert.match(empty, /Nenhum pedido encontrado/)
+  assert.doesNotMatch(empty, /Carregando dados operacionais|role="alert"/)
+  assert.match(render('dashboard', 'admin', { initialTab: 'pedidos' }), /Cliente operacional/)
+})
+
+test('a mutation error after hydration warns without hiding confirmed data or the open order form', () => {
+  const html = render('dashboard', 'admin', { initialTab: 'pedidos' }, {
+    app: { backendError: 'private provider detail' },
+    states: { [files.dashboard]: { 2: true, 3: order } },
+  })
+  assert.match(html, /Não foi possível concluir uma operação/)
+  assert.match(html, /Cliente operacional/)
+  assert.match(html, /Editar Pedido/)
+  assert.doesNotMatch(html, /private provider detail/)
 })
 
 test('dashboard keeps the employee order view and separation controls', () => {

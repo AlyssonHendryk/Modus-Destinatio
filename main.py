@@ -125,7 +125,9 @@ class SeparationResponse(BaseModel):
     status: Literal["separating", "completed"]
     changed: bool
 
+
 class OrderItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     productId: str
     product: str
     quantity: int = Field(gt=0)
@@ -134,15 +136,16 @@ class OrderItem(BaseModel):
 
 
 class Order(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     id: str
     supplier: str = Field(min_length=1)
     # Compatibility during the frontend rollout: legacy requests did not send
     # customer. Null is persisted as null; it is never inferred from supplier.
     customer: Optional[str] = None
-    operation: str
-    status: str
+    operation: Literal["Compra", "Venda"]
+    status: Literal["waiting", "separating", "completed", "shipped", "cancelled"]
     date: str
-    total: float
+    total: float = Field(ge=0)
     stock_applied: bool = False
     items: List[OrderItem] = Field(default_factory=list)
 
@@ -159,6 +162,7 @@ class Order(BaseModel):
 
 
 class Product(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     id: str
     name: str
     quantity: int
@@ -168,7 +172,15 @@ class Product(BaseModel):
     active: bool = True
 
 class StockMovement(BaseModel):
-    delta: int
+    model_config = ConfigDict(extra="forbid")
+    delta: int = Field(strict=True, ge=-2147483648, le=2147483647)
+
+    @field_validator("delta")
+    @classmethod
+    def nonzero_delta(cls, value):
+        if value == 0:
+            raise ValueError("A quantidade deve ser diferente de zero.")
+        return value
 
 
 # Read contracts are independent of the administrative input models above.
@@ -382,10 +394,6 @@ def create_order(order: Order, user: AuthenticatedUser = Depends(require_admin))
         raise_audit_permission_error(error)
         error_message = str(error)
 
-        print(
-            "Erro ao criar pedido e movimentar estoque:",
-            error_message,
-        )
 
         if (
             "Estoque insuficiente" in error_message
@@ -406,7 +414,7 @@ def create_order(order: Order, user: AuthenticatedUser = Depends(require_admin))
         ):
             raise HTTPException(
                 status_code=400,
-                detail=error_message,
+                detail="Dados do pedido inválidos ou operação não permitida.",
             )
 
         raise HTTPException(
@@ -489,10 +497,6 @@ def update_order(order_id: str, updated_order: Order, user: AuthenticatedUser = 
         raise_audit_permission_error(error)
         error_message = str(error)
 
-        print(
-            "Erro ao atualizar pedido:",
-            error_message,
-        )
 
         if "Pedidos concluídos não podem ser editados." in error_message:
             raise HTTPException(409, "Pedidos concluídos não podem ser editados.")
@@ -524,7 +528,7 @@ def update_order(order_id: str, updated_order: Order, user: AuthenticatedUser = 
         ):
             raise HTTPException(
                 status_code=400,
-                detail=error_message,
+                detail="Dados do pedido inválidos ou operação não permitida.",
             )
 
         raise HTTPException(
@@ -629,7 +633,7 @@ def delete_order(order_id: str, user: AuthenticatedUser = Depends(require_admin)
             raise HTTPException(404, "Pedido não encontrado.") from None
         raise HTTPException(
             status_code=500,
-            detail=str(error)
+            detail="Não foi possível excluir o pedido."
         )
     # ============================================================
 # PATCH - MOVIMENTAÇÃO DE ESTOQUE
@@ -675,7 +679,7 @@ def move_product_stock(
 
         raise HTTPException(
             status_code=500,
-            detail=error_message
+            detail="Não foi possível ajustar o estoque."
         )
     # ============================================================
 # GET - HISTÓRICO DE MOVIMENTAÇÕES DE ESTOQUE

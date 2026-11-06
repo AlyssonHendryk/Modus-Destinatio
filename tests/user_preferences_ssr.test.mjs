@@ -32,7 +32,7 @@ test('real provider and Settings render on the server without reading browser st
     function localRequire(specifier) {
       if (specifier === '@/lib/supabase') return { supabase: {} }
       if (specifier === '@/data/mockData') return { initialTasks: [] }
-      if (specifier === '@/services/backend' || specifier === '@/utils/formatters' ||
+      if (specifier === '@/services/backend' || specifier === '@/services/mfa' || specifier === '@/utils/formatters' ||
           specifier === '@/utils/operationalCache') return {}
       if (specifier === 'lucide-react') return new Proxy({}, {
         get: (_target, name) => name === '__esModule' ? true : () => null,

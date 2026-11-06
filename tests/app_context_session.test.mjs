@@ -12,6 +12,9 @@ const preferencesSource = await readFile(new URL('../src/utils/userPreferences.j
 const preferencesUtils = await import(`data:text/javascript;base64,${Buffer.from(preferencesSource).toString('base64')}`)
 const formatterSource = await readFile(new URL('../src/utils/formatters.js', import.meta.url), 'utf8')
 const formatterUtils = await import(`data:text/javascript;base64,${Buffer.from(formatterSource).toString('base64')}`)
+const mfaSource = (await readFile(new URL('../src/services/mfa.js', import.meta.url), 'utf8'))
+  .replace('import { supabase } from "../lib/supabase.js"', 'const supabase = {}')
+const { createMfaService } = await import(`data:text/javascript;base64,${Buffer.from(mfaSource).toString('base64')}`)
 const source = original
   .replace(/import\s+[\s\S]*?\s+from\s+"[^"]+"\s*/g, '')
   .replace(/export function /g, 'function ')
@@ -55,7 +58,7 @@ function deferred() {
   return { promise, resolve }
 }
 
-function harness(initialUser = null) {
+function harness(initialUser = null, seededTasks = []) {
   const slots = []
   const timers = new Map()
   const listeners = new Set()
@@ -63,6 +66,10 @@ function harness(initialUser = null) {
   const calls = []
   const requests = []
   const profiles = new Map()
+  const factors = new Map()
+  const assurance = new Map()
+  const mfaCalls = []
+  let verifyCode = async code => code === '123456' ? null : { message: 'private-code-error' }
   const windowListeners = new Map()
   let cursor = 0
   let timerId = 0
@@ -101,7 +108,7 @@ function harness(initialUser = null) {
     },
   }
   function emit(event, id) {
-    session = id ? { user: { id, email: 'test@example.test' } } : null
+    session = id ? { user: { id, email: 'test@example.test' }, access_token: `${id}-${assurance.get(id) || 'aal1'}` } : null
     for (const listener of listeners) listener(event, session)
   }
   const supabase = {
@@ -112,6 +119,26 @@ function harness(initialUser = null) {
         return { data: { subscription: { unsubscribe: () => listeners.delete(callback) } } }
       },
       getUser: async () => ({ data: { user: session?.user }, error: null }),
+      getSession: async () => ({ data: { session }, error: null }),
+      mfa: {
+        getAuthenticatorAssuranceLevel: async () => {
+          mfaCalls.push('assurance')
+          return { data: { currentLevel: assurance.get(session?.user?.id) || 'aal1' }, error: null }
+        },
+        listFactors: async () => {
+          mfaCalls.push('factors')
+          return { data: { all: factors.get(session?.user?.id) || [] }, error: null }
+        },
+        challengeAndVerify: async ({ code }) => {
+          mfaCalls.push('verify')
+          const id = session?.user?.id
+          const error = await verifyCode(code)
+          if (error) return { data: null, error }
+          assurance.set(id, 'aal2')
+          emit('MFA_CHALLENGE_VERIFIED', id)
+          return { data: { user: session.user, access_token: session.access_token }, error: null }
+        },
+      },
       signInWithPassword: async () => {
         emit('SIGNED_IN', 'A')
         return { data: { user: session.user }, error: null }
@@ -124,6 +151,7 @@ function harness(initialUser = null) {
       }) }) }) }
     },
   }
+  const mfa = createMfaService(supabase)
   const network = Object.fromEntries([
     'getOrders', 'getProducts', 'getStockMovements', 'createOrder', 'updateOrder',
     'removeOrder', 'createProduct', 'updateProduct', 'moveProductStock', 'removeProduct',
@@ -147,7 +175,8 @@ function harness(initialUser = null) {
   const context = vm.createContext({
     document,
     ...hooks, ...network, ...cacheUtils, ...formatterUtils, supabase, createContext: () => ({}),
-    normalizeOrder: order => order, initialUsers: [], initialTasks: [],
+    getMfaRequirement: mfa.requirement, verifyMfaChallenge: mfa.verify, discardStaleMfaSession: mfa.discardStaleSession,
+    normalizeOrder: order => order, initialUsers: [], initialTasks: seededTasks,
     window: {
       localStorage: storage,
       addEventListener: (name, handler) => windowListeners.set(name, handler),
@@ -171,7 +200,7 @@ function harness(initialUser = null) {
     } while (dirty)
   }
   async function settle() {
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 28; i++) {
       await Promise.resolve()
       if (dirty) render()
       const pending = [...timers.values()]
@@ -182,7 +211,9 @@ function harness(initialUser = null) {
   }
   render()
   return {
-    get value() { return value }, calls, requests, cache, profiles, emit, settle, classes,
+    get value() { return value }, calls, requests, cache, profiles, emit, settle, classes, factors, assurance, mfaCalls,
+    setVerify(fn) { verifyCode = fn },
+    get session() { return session },
     setRead(fn) { read = fn },
     replayEffects() {
       for (const slot of slots) if (slot?.setup) { slot.cleanup?.(); slot.cleanup = slot.setup() }
@@ -190,8 +221,52 @@ function harness(initialUser = null) {
     unmount() { for (const slot of slots) slot?.cleanup?.() },
     listenerCount: () => listeners.size,
     focus: () => windowListeners.get('focus')?.(),
+    backendMfaRequired: userId => windowListeners.get('modus:mfa-required')?.({ detail: { userId } }),
   }
 }
+
+test('initial operational reads stay loading until complete, then distinguish real empty data from partial failure', async () => {
+  const waiting = deferred()
+  const h = harness('A')
+  h.setRead(() => waiting.promise)
+  await h.settle()
+  assert.equal(h.value.ordersLoading, true)
+  assert.equal(h.value.hydrated, false)
+  assert.equal(h.value.backendError, null)
+  waiting.resolve([])
+  await h.settle()
+  assert.equal(h.value.ordersLoading, false)
+  assert.equal(h.value.hydrated, true)
+  assert.equal(h.value.orders.length, 0)
+  const failed = harness('A')
+  failed.setRead(async name => {
+    if (name === 'getOrders') throw new Error('API unavailable')
+    return []
+  })
+  await failed.settle()
+  assert.equal(failed.value.ordersLoading, false)
+  assert.equal(failed.value.hydrated, false)
+  assert.equal(failed.value.backendError, 'API unavailable')
+})
+
+test('users without saved tasks start empty rather than seeded, while real tasks persist for their owner', async () => {
+  const h = harness('A', [{ id: 'demo', title: 'Demonstration task', done: true }])
+  h.setRead(async () => [])
+  await h.settle()
+  assert.equal(h.value.tasks.length, 0)
+  h.value.addTask('My real task')
+  await h.settle()
+  assert.equal(h.value.tasks[0].title, 'My real task')
+  await h.value.logout()
+  await h.settle()
+  h.emit('SIGNED_IN', 'A')
+  await h.settle()
+  assert.equal(h.value.tasks.length, 1)
+  assert.equal(h.value.tasks[0].title, 'My real task')
+  h.emit('SIGNED_IN', 'B')
+  await h.settle()
+  assert.equal(h.value.tasks.length, 0)
+})
 
 test('no private reads before authentication and active profile validation', async () => {
   const h = harness()
@@ -810,4 +885,225 @@ test('late profile save cannot overwrite a different logged-in account', async (
   await h.settle()
   assert.equal(h.value.currentUser.id, 'B')
   assert.equal(h.value.currentUser.name, 'B')
+})
+
+const adminProfile = { name: 'Admin', role: 'admin', status: 'active' }
+const totpFactor = { id: 'test-factor', factor_type: 'totp', status: 'verified' }
+
+test('admin password login stops at MFA without restoring private data or completing login', async () => {
+  const h = harness()
+  h.profiles.set('A', adminProfile)
+  h.factors.set('A', [totpFactor])
+  await h.settle()
+  const result = await h.value.login('test@example.test', 'password')
+  await h.settle()
+  assert.equal(result.ok, false)
+  assert.equal(result.mfaRequired, true)
+  assert.equal(h.value.mfaPending, true)
+  assert.equal(h.value.currentUser, null)
+  assert.equal(h.value.orders.length, 0)
+  assert.equal(h.value.inventory.length, 0)
+  assert.equal(h.value.stockMovements.length, 0)
+  assert.equal(h.calls.length, 0)
+})
+
+test('valid TOTP revalidates aal2 and profile before loading data; invalid code permits safe retry', async () => {
+  const h = harness('A')
+  h.profiles.set('A', adminProfile)
+  h.factors.set('A', [totpFactor])
+  await h.settle()
+  assert.equal((await h.value.completeMfa('000000')).ok, false)
+  await h.settle()
+  assert.equal(h.value.currentUser, null)
+  assert.equal(h.value.mfaPending, true)
+  assert.equal(h.calls.length, 0)
+  assert.equal((await h.value.completeMfa('123456')).ok, true)
+  await h.settle()
+  assert.equal(h.value.currentUser.role, 'admin')
+  assert.equal(h.value.mfaPending, false)
+  assert.equal(h.calls.length, 3)
+  assert.doesNotMatch(JSON.stringify([...h.cache.values()]), /123456|test-factor/)
+})
+
+test('restoration distinguishes admin aal1 from aal2 and ignores unverified factors', async () => {
+  for (const [level, factor, pending] of [
+    ['aal1', totpFactor, true], ['aal2', totpFactor, false],
+    ['aal1', { ...totpFactor, status: 'unverified' }, false],
+  ]) {
+    const h = harness('A')
+    h.profiles.set('A', adminProfile)
+    h.factors.set('A', [factor])
+    h.assurance.set('A', level)
+    h.replayEffects()
+    await h.settle()
+    assert.equal(h.value.mfaPending, pending)
+    assert.equal(h.calls.length, pending ? 0 : 3)
+    assert.equal(Boolean(h.value.currentUser), !pending)
+  }
+})
+
+test('employee with an external factor keeps password login and never calls MFA', async () => {
+  const h = harness('A')
+  h.factors.set('A', [totpFactor])
+  await h.settle()
+  assert.equal(h.value.currentUser.role, 'employee')
+  assert.equal(h.value.mfaPending, false)
+  assert.equal(h.mfaCalls.length, 0)
+})
+
+test('cancelling MFA signs out and clears pending state without private requests', async () => {
+  const h = harness('A')
+  h.profiles.set('A', adminProfile)
+  h.factors.set('A', [totpFactor])
+  await h.settle()
+  await h.value.logout()
+  await h.settle()
+  assert.equal(h.session, null)
+  assert.equal(h.value.mfaPending, false)
+  assert.equal(h.value.currentUser, null)
+  assert.equal(h.calls.length, 0)
+  assert.equal((await h.value.completeMfa('123456')).ok, false)
+})
+
+test('identity changes cannot inherit the old MFA state or stale private reads', async () => {
+  const h = harness('A')
+  const oldRead = deferred()
+  h.setRead(() => oldRead.promise)
+  await h.settle()
+  h.profiles.set('B', adminProfile)
+  h.factors.set('B', [totpFactor])
+  h.emit('SIGNED_IN', 'B')
+  await h.settle()
+  oldRead.resolve([{ id: 'old-private-data' }])
+  await h.settle()
+  assert.equal(h.value.mfaPending, true)
+  assert.equal(h.value.currentUser, null)
+  assert.equal(h.value.orders.length, 0)
+  h.emit('SIGNED_IN', 'C')
+  await h.settle()
+  assert.equal(h.value.currentUser.id, 'C')
+  assert.equal(h.value.mfaPending, false)
+})
+
+test('late MFA verification after logout cannot resurrect access or the SDK session', async () => {
+  const h = harness('A')
+  h.profiles.set('A', adminProfile)
+  h.factors.set('A', [totpFactor])
+  await h.settle()
+  const reply = deferred()
+  h.setVerify(() => reply.promise)
+  const verification = h.value.completeMfa('123456')
+  await h.settle()
+  assert.equal(h.mfaCalls.filter(call => call === 'verify').length, 1)
+  assert.equal((await h.value.completeMfa('123456')).ok, false)
+  await h.value.logout()
+  reply.resolve(null)
+  assert.equal((await verification).ok, false)
+  await h.settle()
+  assert.equal(h.value.currentUser, null)
+  assert.equal(h.value.mfaPending, false)
+  assert.equal(h.session, null)
+  assert.equal(h.calls.length, 0)
+})
+
+test('identity switch during MFA verification prevents the old administrator from being released', async () => {
+  const h = harness('A')
+  h.profiles.set('A', adminProfile)
+  h.factors.set('A', [totpFactor])
+  await h.settle()
+  const reply = deferred()
+  h.setVerify(() => reply.promise)
+  const verification = h.value.completeMfa('123456')
+  await h.settle()
+  h.emit('SIGNED_IN', 'B')
+  await h.settle()
+  reply.resolve(null)
+  assert.equal((await verification).ok, false)
+  await h.settle()
+  assert.notEqual(h.value.currentUser?.id, 'A')
+  assert.equal(h.value.mfaPending, false)
+  assert.equal(h.calls.length, 0)
+})
+
+test('profile disabled during MFA verification never loads private data', async () => {
+  const h = harness('A')
+  h.profiles.set('A', adminProfile)
+  h.factors.set('A', [totpFactor])
+  await h.settle()
+  h.profiles.set('A', { ...adminProfile, status: 'inactive' })
+  assert.equal((await h.value.completeMfa('123456')).ok, false)
+  await h.settle()
+  assert.equal(h.value.currentUser, null)
+  assert.equal(h.value.mfaPending, false)
+  assert.equal(h.calls.length, 0)
+})
+
+test('verification response without a confirmed aal2 session never releases the administrator', async () => {
+  const h = harness('A')
+  h.profiles.set('A', adminProfile)
+  h.factors.set('A', [totpFactor])
+  await h.settle()
+  const profile = deferred()
+  h.profiles.set('A', profile.promise)
+  const verification = h.value.completeMfa('123456')
+  await h.settle()
+  h.assurance.set('A', 'aal1')
+  profile.resolve(adminProfile)
+  assert.equal((await verification).ok, false)
+  await h.settle()
+  assert.equal(h.value.currentUser, null)
+  assert.equal(h.value.mfaPending, true)
+  assert.equal(h.calls.length, 0)
+})
+
+test('backend mfa_required discards initial data and enters the challenge without repeated API reads', async () => {
+  const h = harness('A')
+  h.profiles.set('A', adminProfile)
+  h.setRead(async () => { throw Object.assign(new Error('mfa_required'), { status: 403, code: 'mfa_required' }) })
+  await h.settle()
+  assert.equal(h.value.mfaPending, true)
+  assert.equal(h.value.currentUser, null)
+  assert.equal(h.value.inventory.length, 0)
+  assert.equal(h.value.orders.length, 0)
+  assert.equal(h.calls.length, 3)
+  await h.settle()
+  assert.equal(h.calls.length, 3)
+})
+
+test('enabling MFA invalidates current data on revalidation and MFA auth events release only aal2', async () => {
+  const h = harness('A')
+  h.profiles.set('A', adminProfile)
+  await h.settle()
+  assert.equal(h.calls.length, 3)
+  h.factors.set('A', [totpFactor])
+  h.emit('TOKEN_REFRESHED', 'A')
+  await h.settle()
+  assert.equal(h.value.mfaPending, true)
+  assert.equal(h.value.orders.length, 0)
+  h.assurance.set('A', 'aal2')
+  h.emit('MFA_CHALLENGE_VERIFIED', 'A')
+  await h.settle()
+  assert.equal(h.value.mfaPending, false)
+  assert.equal(h.value.currentUser.role, 'admin')
+  assert.equal(h.calls.length, 6)
+})
+
+test('a current backend MFA notification clears application access; old identities cannot affect a new session', async () => {
+  const h = harness('A')
+  h.profiles.set('A', adminProfile)
+  await h.settle()
+  h.backendMfaRequired('old-user')
+  await h.settle()
+  assert.equal(h.value.currentUser.id, 'A')
+  h.backendMfaRequired('A')
+  await h.settle()
+  assert.equal(h.value.currentUser, null)
+  assert.equal(h.value.mfaPending, true)
+  assert.equal(h.value.orders.length, 0)
+  h.emit('SIGNED_IN', 'B')
+  await h.settle()
+  h.backendMfaRequired('A')
+  await h.settle()
+  assert.equal(h.value.currentUser.id, 'B')
+  assert.equal(h.value.mfaPending, false)
 })

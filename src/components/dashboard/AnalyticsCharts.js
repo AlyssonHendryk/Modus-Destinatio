@@ -6,7 +6,7 @@ import { canViewFinancials, sumFinancialValues } from "@/utils/financialPresenta
 export default function AnalyticsCharts({ orders = [] }) {
   const { currentUser } = useApp()
   const isAdmin = canViewFinancials(currentUser)
-  const salesOrders = isAdmin ? orders.filter(order => order.status !== "cancelled") : []
+  const salesOrders = isAdmin ? orders.filter(order => order.operation === "Venda" && order.status !== "cancelled") : []
   const showSales = isAdmin && sumFinancialValues(salesOrders.map(order => order.total)) !== undefined
   const byDate = new Map()
   if (showSales) {
@@ -23,7 +23,7 @@ export default function AnalyticsCharts({ orders = [] }) {
   const statusData = [...byStatus].map(([name, value]) => ({ name, value }))
   return (
     <div className={`grid grid-cols-1 ${showSales ? "lg:grid-cols-2" : ""} gap-6`}>
-      {showSales && <div className="bg-white rounded-2xl p-6 shadow-sm border">
+      {showSales && <div className="min-w-0 bg-white rounded-2xl p-4 sm:p-6 shadow-sm border">
         <h3 className="font-semibold text-gray-900">Vendas por data</h3>
         <p className="text-sm text-gray-500 mb-4">Calculado a partir dos pedidos</p>
         <ResponsiveContainer width="100%" height={250}>
@@ -33,7 +33,7 @@ export default function AnalyticsCharts({ orders = [] }) {
           </LineChart>
         </ResponsiveContainer>
       </div>}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border">
+      <div className="min-w-0 bg-white rounded-2xl p-4 sm:p-6 shadow-sm border">
         <h3 className="font-semibold text-gray-900">Pedidos por status</h3>
         <p className="text-sm text-gray-500 mb-4">Distribuição atual</p>
         <ResponsiveContainer width="100%" height={250}>

@@ -265,13 +265,13 @@ export default function UsersManagement({ onUsersChanged }) {
   const totalPages = Math.max(1, Math.ceil(visibleTotal / perPage))
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-      <div className="p-6 border-b flex items-center justify-between gap-4">
+    <div className="min-w-0 max-w-full bg-white rounded-2xl shadow-sm border overflow-hidden">
+      <div className="p-4 border-b flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-center sm:p-6">
         <div>
           <h3 className="font-semibold text-gray-900">Gerenciamento de Usuários</h3>
           <p className="text-sm text-gray-500">Contas reais vinculadas ao Supabase Auth.</p>
         </div>
-        <button onClick={openCreate} disabled={submitting} className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl disabled:opacity-60">
+        <button onClick={openCreate} disabled={submitting} className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl disabled:opacity-60">
           <Plus className="w-4 h-4" />Novo Usuário
         </button>
       </div>
@@ -319,14 +319,14 @@ export default function UsersManagement({ onUsersChanged }) {
 
       {deleteCandidateIsCurrent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="delete-employee-title">
-          <form onSubmit={confirmEmployeeDeletion} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+          <form onSubmit={confirmEmployeeDeletion} className="my-auto max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 shadow-xl sm:p-6">
             <h4 id="delete-employee-title" className="text-lg font-semibold text-gray-900">Excluir funcionário permanentemente</h4>
-            <p className="mt-2 text-sm text-gray-700">Você está prestes a excluir permanentemente <strong>{deleteCandidate.name}</strong>. Esta ação não pode ser desfeita.</p>
+            <p className="mt-2 text-sm text-gray-700 [overflow-wrap:anywhere]">Você está prestes a excluir permanentemente <strong>{deleteCandidate.name}</strong>. Esta ação não pode ser desfeita.</p>
             <label className="mt-4 block text-sm font-medium text-gray-800" htmlFor="delete-confirmation">Digite <strong>EXCLUIR</strong> para confirmar</label>
             <input id="delete-confirmation" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)}
               disabled={deleteOperationIsCurrent} autoComplete="off" className="mt-2 w-full rounded-lg border p-2 text-gray-900 disabled:bg-gray-100" />
             {deleteErrorIsCurrent && <p className="mt-3 text-sm text-red-600" role="alert">{deleteError.text}</p>}
-            <div className="mt-5 flex justify-end gap-3">
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
               {deleteErrorIsCurrent && <button type="button" onClick={() => loadUsers(page)} disabled={deleteOperationIsCurrent} className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50">Atualizar lista</button>}
               <button type="button" onClick={closeDeleteConfirmation} disabled={deleteOperationIsCurrent} className="rounded-lg border px-4 py-2 text-sm disabled:opacity-50">Cancelar</button>
               <button type="submit" disabled={deleteOperationIsCurrent} className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm text-white disabled:opacity-50">
@@ -337,8 +337,8 @@ export default function UsersManagement({ onUsersChanged }) {
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="w-full">
+      <div className="max-w-full overflow-x-auto">
+        <table className="w-full min-w-[40rem]">
           <thead><tr className="bg-gray-50 border-y">
             {['Nome', 'E-mail', 'Perfil', 'Status', 'Ações'].map((heading) => (
               <th key={heading} className="text-left p-4 text-xs text-gray-500 uppercase">{heading}</th>
@@ -382,7 +382,7 @@ export default function UsersManagement({ onUsersChanged }) {
         </table>
       </div>
 
-      <div className="p-4 border-t flex items-center justify-between gap-3 text-sm text-gray-600">
+      <div className="p-4 border-t flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center text-sm text-gray-600">
         <span>{visibleTotal} usuário{visibleTotal === 1 ? '' : 's'}</span>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => loadUsers(page - 1)} disabled={usersLoading || page <= 1}

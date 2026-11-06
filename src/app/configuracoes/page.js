@@ -83,7 +83,7 @@ export default function ConfiguracoesPage() {
   // ============================================================
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6 space-y-6">
+    <div className="min-h-dvh min-w-0 bg-gray-50 p-4 space-y-6 sm:p-6">
       <SettingsHeader
         title="Configurações do Sistema"
         description="Gerencie conta, usuários, segurança e preferências."

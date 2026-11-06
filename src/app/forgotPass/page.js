@@ -17,8 +17,8 @@ export default function EsqueciSenha() {
     catch (failure) { setMessage(failure.message) }
     finally { pending.current = false; setSending(false) }
   }
-  return <main className="min-h-screen flex items-center justify-center bg-gradient-to-r from-purple-600 to-orange-500 p-4">
-    <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+  return <main className="min-h-dvh flex flex-col bg-gradient-to-r from-purple-600 to-orange-500 p-4">
+    <div className="mx-auto my-auto bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
       <div className="bg-gradient-to-r from-purple-600 to-orange-500 text-white text-center p-6"><h1 className="text-xl font-bold">Recuperar senha</h1></div>
       <form onSubmit={submit} className="p-6 space-y-4">
         <label htmlFor="recovery-email" className="block text-sm text-gray-700">E-mail cadastrado</label>
